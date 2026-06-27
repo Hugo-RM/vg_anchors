@@ -45,11 +45,13 @@ def init_worker():
     pass
 
 
+@profile
 def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     """
     Worker function to process a chunk of GAF lines.
     This function is executed in a separate process.
     """
+    profile.enable()
     global shared_align_anchor
 
     # Initialize local dictionaries to store results for this chunk.
@@ -90,6 +92,7 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
         print(f" ..Processed {len(gaf_chunk_lines)} lines in {time.time()-t0:.2f}s", file=stderr)
 
+    profile._profile.dump_stats(f"worker_gaf_{os.getpid()}.lprof")
     # Return the collected results from this worker.
     return {
         "anchor_reads_dict": local_anchor_reads_dict,
@@ -156,9 +159,10 @@ class Orchestrator:
         global shared_align_anchor
         shared_align_anchor = self.align_anchor
         
+        os.environ["LINE_PROFILE"] = "1"
         # Divide the GAF file into chunks
         gaf_chunks = self._chunk_gaf_file(self.gaf_path, self.threads)
-        
+
         # Initialize the worker processes and run the process_gaf_chunk function on each chunk
         with multiprocessing.Pool(processes=self.threads, initializer=init_worker) as pool:
             results = pool.map(process_gaf_chunk, gaf_chunks)

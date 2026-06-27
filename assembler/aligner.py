@@ -72,10 +72,12 @@ def init_worker_snarl():
     pass
 
 
+@profile
 def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     """
     Worker function to run reliable snarl finding on each snarl chunk
     """
+    profile.enable()
     global shared_align_anchor
 
     if settings.DEBUG:
@@ -102,6 +104,7 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
         print(f".. Processed {len(chunk_snarl_list)} snarls in {time.time() - t0}s", flush=True, file=stderr)
 
+    profile._profile.dump_stats(f"worker_snarl_{os.getpid()}.lprof")
     return result
 
 
@@ -1952,6 +1955,7 @@ class AlignAnchor:
             if _binomial_pvalue_lookup is None:
                 _binomial_pvalue_lookup = _build_binomial_pvalue_lookup(settings.MAX_POTENTIALLY_LINKED_SNARLS_TO_KEEP)
 
+        os.environ["LINE_PROFILE"] = "1"
         # Divide the snarl IDs list into chunks
         list_of_chunked_snarl_ids = self._prepare_snarl_id_chunks_for_parallel_processing()
         with multiprocessing.Pool(processes=self.threads, initializer=init_worker_snarl) as pool:
@@ -2031,6 +2035,7 @@ class AlignAnchor:
 
         return
 
+    @profile
     def _find_potentially_linked_snarls(self, current_snarl_id: str, local_snarl_pos_in_read_dict: dict=None) -> set:
         """
         Find snarls potentially linked to the current snarl.
@@ -2069,6 +2074,7 @@ class AlignAnchor:
         return potentially_linked_snarls_list
 
 
+    @profile
     def _find_linked_snarls_for_current_snarl(self, current_snarl_id: str, snarl_list: list, local_snarl_pos_in_read_dict: dict=None, local_snarl_coverage_dict: dict=None, local_snarl_allelic_coverage_dict: dict=None) -> dict:
         """
         Find snarls linked to the current snarl and count the common reads. 
@@ -2220,6 +2226,7 @@ class AlignAnchor:
         return (n, k)
 
 
+    @profile
     def _are_snarls_compatible(self, primary_snarl: str, other_snarl: str, snarl_read_partitions_dict: dict=None) -> tuple[bool, str, int | None, int | None]:
         """
         Check if two snarls are compatible:
@@ -2321,6 +2328,7 @@ class AlignAnchor:
 
             return (True, "True", num_common_reads)
         
+        @profile
         def _are_sets_equal_with_error_tolerance(primary_sets, other_sets, error_tolerance=0.1):
             """
             Check if two sets are equal with error tolerance.
@@ -2368,6 +2376,7 @@ class AlignAnchor:
             return (False, desc, num_common_reads, primary_partition_k)
 
 
+    @profile
     def find_reliable_snarls(self, valid_anchors: list, snarl_list: list) -> dict:
         """
         Finds reliable snarls by checking if the current snarl is compatible with 
@@ -2949,6 +2958,7 @@ def verify_path_concordance(
     return (True, start_walk, end_walk, relative_strand, start_walk_for_cs_matching, end_walk_for_cs_matching)
 
 
+@profile
 def verify_sequence_agreement(
     # self,
     anchor: Anchor,
