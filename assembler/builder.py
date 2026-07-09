@@ -15,12 +15,13 @@ from sys import stderr
 import pickle
 
 # Line profiler decorator - will be available when running under kernprof
-try:
-    from line_profiler import profile
-except ImportError:
-    # If line_profiler is not available, create a no-op decorator
-    def profile(func):
-        return func
+import os
+if not os.environ.get("MEMORY_PROFILE"):
+    try:
+        from line_profiler import profile
+    except ImportError:
+        def profile(func):
+            return func
 
 
 class AnchorDictionary:

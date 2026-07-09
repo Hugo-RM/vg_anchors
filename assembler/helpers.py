@@ -1,10 +1,12 @@
 from sys import argv, stderr, exit
 
-try:
-    from line_profiler import profile
-except ImportError:
-    def profile(func):
-        return func
+import os
+if not os.environ.get("MEMORY_PROFILE"):
+    try:
+        from line_profiler import profile
+    except ImportError:
+        def profile(func):
+            return func
 import json
 from collections import defaultdict
 from assembler.anchor import Anchor

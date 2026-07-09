@@ -1,11 +1,13 @@
 from sys import stderr
 from assembler.config import settings
 
-try:
-    from line_profiler import profile
-except ImportError:
-    def profile(func):
-        return func
+import os
+if not os.environ.get("MEMORY_PROFILE"):
+    try:
+        from line_profiler import profile
+    except ImportError:
+        def profile(func):
+            return func
 
 """
 This functions process the gaf alignment file from Giraffe HiFi and return the necessary data

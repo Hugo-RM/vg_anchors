@@ -3,23 +3,23 @@ import time
 import pickle
 import tempfile
 import subprocess
+import os
 import os.path
 from sys import stderr, stdout, exit
 from collections import defaultdict
 import copy
 import multiprocessing
-from typing import Union 
+from typing import Union
 import assembler.helpers as helpers
 import re
 import math
 
-# Make @profile available - it acts as a no-op when not using kernprof
-try:
-    from line_profiler import profile
-except ImportError:
-    # If line_profiler is not available, create a no-op decorator
-    def profile(func):
-        return func
+if not os.environ.get("MEMORY_PROFILE"):
+    try:
+        from line_profiler import profile
+    except ImportError:
+        def profile(func):
+            return func
 # import shasta2
 
 from bdsg.bdsg import PackedGraph
@@ -77,7 +77,7 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     """
     Worker function to run reliable snarl finding on each snarl chunk
     """
-    if hasattr(profile, 'enable'):
+    if hasattr(profile, '_profile'):
         profile.enable()
     global shared_align_anchor
 
@@ -1984,8 +1984,11 @@ class AlignAnchor:
         os.environ["LINE_PROFILE"] = "1"
         # Divide the snarl IDs list into chunks
         list_of_chunked_snarl_ids = self._prepare_snarl_id_chunks_for_parallel_processing()
-        with multiprocessing.Pool(processes=self.threads, initializer=init_worker_snarl) as pool:
-            results = pool.map(process_each_snarl_chunk_in_worker, list_of_chunked_snarl_ids)
+        if os.environ.get("MEMORY_PROFILE"):
+            results = [process_each_snarl_chunk_in_worker(chunk) for chunk in list_of_chunked_snarl_ids]
+        else:
+            with multiprocessing.Pool(processes=self.threads, initializer=init_worker_snarl) as pool:
+                results = pool.map(process_each_snarl_chunk_in_worker, list_of_chunked_snarl_ids)
         
         # Restore the graph after multiprocessing completes
         self.graph = graph_backup

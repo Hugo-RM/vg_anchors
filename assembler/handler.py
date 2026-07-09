@@ -9,11 +9,12 @@ import os
 from assembler.config import settings
 from collections import defaultdict
 from assembler.read import Read
-try:
-    from line_profiler import profile
-except ImportError:
-    def profile(func):
-        return func
+if not os.environ.get("MEMORY_PROFILE"):
+    try:
+        from line_profiler import profile
+    except ImportError:
+        def profile(func):
+            return func
 
 # Ensure we use fork mode for true copy-on-write behavior
 # (on Linux, this is the default, but we make it explicit for clarity)
@@ -47,7 +48,7 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     Worker function to process a chunk of GAF lines.
     This function is executed in a separate process.
     """
-    if hasattr(profile, 'enable'):
+    if hasattr(profile, '_profile'):
         profile.enable()
     global shared_align_anchor
 
@@ -163,9 +164,13 @@ class Orchestrator:
         # Divide the GAF file into chunks
         gaf_chunks = self._chunk_gaf_file(self.gaf_path, self.threads)
 
-        # Initialize the worker processes and run the process_gaf_chunk function on each chunk
-        with multiprocessing.Pool(processes=self.threads, initializer=init_worker) as pool:
-            results = pool.map(process_gaf_chunk, gaf_chunks)
+        # Bypass Pool when memory profiling: pool.map pickles the worker function,
+        # which fails when memory_profiler wraps it in an unpicklable closure.
+        if os.environ.get("MEMORY_PROFILE"):
+            results = [process_gaf_chunk(chunk) for chunk in gaf_chunks]
+        else:
+            with multiprocessing.Pool(processes=self.threads, initializer=init_worker) as pool:
+                results = pool.map(process_gaf_chunk, gaf_chunks)
         
         if settings.DEBUG:
             print("Merging results from worker processes...", file=stderr)
