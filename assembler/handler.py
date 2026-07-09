@@ -9,15 +9,9 @@ import os
 from assembler.config import settings
 from collections import defaultdict
 from assembler.read import Read
-from memory_profiler import profile as mem_profile
-from line_profiler import profile as line_profile
-import sys
-
-# Make @profile available - it acts as a no-op when not using kernprof
 try:
     from line_profiler import profile
 except ImportError:
-    # If line_profiler is not available, create a no-op decorator
     def profile(func):
         return func
 
@@ -33,9 +27,11 @@ except RuntimeError:
 # Note: Set this before creating the multiprocessing pool to leverage fork()'s copy-on-write
 shared_align_anchor = None
 
+@profile
 def nested_dd_factory():
     return defaultdict(list)
 
+@profile
 def init_worker():
     """
     Initializer for each worker process in the pool.
@@ -51,7 +47,8 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     Worker function to process a chunk of GAF lines.
     This function is executed in a separate process.
     """
-    profile.enable()
+    if hasattr(profile, 'enable'):
+        profile.enable()
     global shared_align_anchor
 
     # Initialize local dictionaries to store results for this chunk.
@@ -92,7 +89,8 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
         print(f" ..Processed {len(gaf_chunk_lines)} lines in {time.time()-t0:.2f}s", file=stderr)
 
-    profile._profile.dump_stats(f"worker_gaf_{os.getpid()}.lprof")
+    if hasattr(profile, '_profile'):
+        profile._profile.dump_stats(f"worker_gaf_{os.getpid()}.lprof")
     # Return the collected results from this worker.
     return {
         "anchor_reads_dict": local_anchor_reads_dict,
@@ -103,6 +101,7 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
 
 class Orchestrator:
 
+    @profile
     def __init__(
         self, dictionary_path: str, graph_path: str, gaf_path: str, fasta_path: str, threads: int, read_id_map: dict = None
     ):
@@ -131,6 +130,7 @@ class Orchestrator:
         self.threads = int(threads)
         self.total_reads_in_gaf = 0
 
+    @profile
     def _chunk_gaf_file(self, gaf_path: str, num_chunks: int) -> list:
         """
         Reads a GAF file and splits its lines into a specified number of chunks for parallel processing.
@@ -213,18 +213,21 @@ class Orchestrator:
             self.align_anchor.dump_valid_anchors(**kwargs)
 
 
+    @profile
     def dump_dictionary_with_counts(self, out_file: str):
         """
         It dumps the positioned anchor dictionary by json
         """
         self.align_anchor.dump_dictionary_with_reads_counts(out_file)
 
+    @profile
     def dump_dict_size_extended(self, out_file: str):
         """
         It dumps the anchors by json
         """
         self.align_anchor.print_extended_anchor_info(out_file) 
 
+    @profile
     def dump_bandage_csv_extended(self, out_file: str):
         """
         It dumps CSV with node and colour of all anchor nodes

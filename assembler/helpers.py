@@ -1,4 +1,10 @@
 from sys import argv, stderr, exit
+
+try:
+    from line_profiler import profile
+except ImportError:
+    def profile(func):
+        return func
 import json
 from collections import defaultdict
 from assembler.anchor import Anchor
@@ -7,6 +13,7 @@ import gzip
 from contextlib import contextmanager
 from Bio import SeqIO
 
+@profile
 def reverse_complement(string) -> str:
     rev_str = string[::-1]
     r_c = ""
@@ -37,6 +44,7 @@ def open_fastq(filename):
             print(f"Error opening file {filename}: {e}")
         raise
 
+@profile
 def fastq_lines(in_fastqs):
     for fname in in_fastqs:
         if settings.DEBUG:
@@ -44,6 +52,7 @@ def fastq_lines(in_fastqs):
         with open_fastq(fname) as f:
             yield from f
 
+@profile
 def fastq_entries(fastq_lines_iter):
     """Generator that yields complete FASTQ entries"""
     while True:
@@ -65,15 +74,18 @@ def fastq_entries(fastq_lines_iter):
 
 
 # Function to get complement
+@profile
 def complement(seq):
     # Define complement dictionary
     complement_map = str.maketrans("ACGTacgt", "TGCAtgca")
     return seq.translate(complement_map)
 
 # Function to get reverse complement
+@profile
 def rev_c(seq):
     return complement(seq)[::-1]
 
+@profile
 def extract_sequence(fasta_file, read_id):
     """
     get sequence for read from fasta

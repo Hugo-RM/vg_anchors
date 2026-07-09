@@ -1,6 +1,12 @@
 from sys import stderr
 from assembler.config import settings
 
+try:
+    from line_profiler import profile
+except ImportError:
+    def profile(func):
+        return func
+
 """
 This functions process the gaf alignment file from Giraffe HiFi and return the necessary data
 structured for "fast" anchor queries.
@@ -14,6 +20,7 @@ For cs tag description see : https://lh3.github.io/minimap2/minimap2.html#10
 """
 
 
+@profile
 def processGafLine(gaf_line: str):
     """
     It parses a GAF line to extract and structure useful tags and returns them in a list
@@ -111,6 +118,7 @@ def processGafLine(gaf_line: str):
     return None
 
 
+@profile
 def parse_cs_tag(cs_string: str):
     """
     This generator iterates over the cs tag string and returns a list of 'steps' that spell the alignment

@@ -10,7 +10,6 @@ import copy
 import multiprocessing
 from typing import Union 
 import assembler.helpers as helpers
-from line_profiler import profile as line_profile
 import re
 import math
 
@@ -64,6 +63,7 @@ _binomial_pvalue_lookup = None
 shared_align_anchor = None
 
 
+@profile
 def init_worker_snarl():
     """
     Initializer for the snarl processing multiprocessing pool.
@@ -77,7 +77,8 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     """
     Worker function to run reliable snarl finding on each snarl chunk
     """
-    profile.enable()
+    if hasattr(profile, 'enable'):
+        profile.enable()
     global shared_align_anchor
 
     if settings.DEBUG:
@@ -104,12 +105,14 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
         print(f".. Processed {len(chunk_snarl_list)} snarls in {time.time() - t0}s", flush=True, file=stderr)
 
-    profile._profile.dump_stats(f"worker_snarl_{os.getpid()}.lprof")
+    if hasattr(profile, '_profile'):
+        profile._profile.dump_stats(f"worker_snarl_{os.getpid()}.lprof")
     return result
 
 
 class AlignAnchor:
 
+    @profile
     def __init__(self, threads: int, read_id_map: dict = None) -> None:
         # useful initialization objects
         self.threads = threads
@@ -146,6 +149,7 @@ class AlignAnchor:
         self.read_to_snarl_dictionary = {}  # {read_id: [snarl_id1, snarl_id2, ...]} Read journeys (i.e. the snarl IDs it passes through in order)
 
 
+    @profile
     def merge_results(self, result, reads_processed_file_path=None):
         """
         Merges the results from a worker process into the main AlignAnchor instance.
@@ -191,6 +195,7 @@ class AlignAnchor:
             self.anchor_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
 
 
+    @profile
     def readFasta(self, fasta_path: str) -> None:
         """
         If FASTA file is provided, read it and update the read_id_map dictionary which maps the read_name to a read_id for Shasta process
@@ -218,6 +223,7 @@ class AlignAnchor:
             self.anchor_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
 
 
+    @profile
     def _extending_anchors_by_merging(self, snarl_ids_sorted_list_up_to_date, snarl_ids_sorted_list_iterator_idx, current_snarl_id, other_snarl_id, current_snarl_anchors, extend_left, anchors_to_discard, snarl_orientation, merging_round) -> list:
         """
         Attempts to merge anchors from two adjacent snarls. This function is called when we want to combine anchors
@@ -465,6 +471,7 @@ class AlignAnchor:
         return (new_anchors_after_merging, snarl_ids_sorted_list_iterator_idx)
     
 
+    @profile
     def _extending_anchors_to_1_degree_node(self, node_handle_to_extend_to, current_snarl_boundary_handle, current_snarl_id, current_snarl_anchors, extend_left, anchors_to_discard, snarl_ids_sorted, snarl_ids_list_idx):
         """
         Extends anchors in a snarl into an adjacent 1-degree node. This function is called when we want to
@@ -600,6 +607,7 @@ class AlignAnchor:
             return current_snarl_anchors
 
 
+    @profile
     def _helper_get_in_degree_to_prev_boundary_node(self, next_node_handle, anchor_seq_list):
         """
         Helper function to get the in degree to the previous boundary node for a given node id.
@@ -623,6 +631,7 @@ class AlignAnchor:
         return 2
 
 
+    @profile
     def _try_extension(self, current_snarl_anchors, current_snarl_id, other_snarl_id, anchors_to_discard, per_anchor_max_bps_to_extend, extend_left, extension_iteration):
         """
         Attempts to extend anchors in a snarl towards an adjacent snarl. This function handles the actual
@@ -842,6 +851,7 @@ class AlignAnchor:
         return current_snarl_anchors
 
 
+    @profile
     def _get_max_read_drop(self, current_anchor_readcov: int, extension_iteration: int):
         """
         This function computes the allowed read drop for each anchor.
@@ -874,6 +884,7 @@ class AlignAnchor:
             #     return settings.MAX_READ_DROPS_ALLOWED
 
 
+    @profile
     def _get_max_cs_avail_in_anchor(self, current_anchor_cs_avail_list: list, read_drops_allowed: int) -> int:
         """
         This function returns the max base pairs available for extension based on allowed read drops computed for that anchor
@@ -884,6 +895,7 @@ class AlignAnchor:
         return(current_anchor_cs_avail_list_sorted[read_drops_allowed])
 
         
+    @profile
     def _extending_snarl_boundaries(self, current_snarl_anchors, current_snarl_id, snarl_ids_sorted, snarl_ids_list_idx, anchors_to_discard, extension_iteration):
         """
         Extends the boundaries of a snarl by attempting to extend its anchors. This function is the main
@@ -1009,6 +1021,7 @@ class AlignAnchor:
                 print(f"...current anchor's ({anchor!r}) new basepairlength is {anchor.basepairlength}, and new bp_matched_reads are {anchor.bp_matched_reads}")
             
 
+    @profile
     def _helper_extension_loop(self, snarl_ids_sorted, anchors_to_remove, extension_iteration, is_het_round=True):
         """
         This function is a helper for extending snarl boundaries in a loop. It is used to
@@ -1058,6 +1071,7 @@ class AlignAnchor:
             snarl_ids_list_idx += 1
 
 
+    @profile
     def _helper_find_relevant_boundary_node_details_for_current_snarl(self, current_snarl_anchors, which_boundary):
         # calculate snarl max boundaries
         if which_boundary == 'left':
@@ -1088,6 +1102,7 @@ class AlignAnchor:
             raise ValueError("Invalid boundary type specified. Use 'left' or 'right'.")
 
 
+    @profile
     def _helper_find_bps_available_for_extension(self, current_snarl_id: int, other_snarl_id: Union[str, int], extend_left: bool):
         current_snarl_anchors_from_before_extension = self.before_extension_snarl_to_anchors_dictionary[current_snarl_id]
         current_snarl_boundary_node_id, current_snarl_boundary_node_bps_occupied = self._helper_find_relevant_boundary_node_details_for_current_snarl(current_snarl_anchors_from_before_extension, 'left' if extend_left else 'right')
@@ -1154,6 +1169,7 @@ class AlignAnchor:
         return current_bps_count - initial_bps_count
 
 
+    @profile
     def extend_and_insert_node(self, current_extended_anchor, current_snarl_boundary_node_id, current_snarl_boundary_bps_occupied, additional_bps_to_cover, extend_left):
         if settings.DEBUG:
             print(f"DEBUG: extend_and_insert_node called - node_id: {current_snarl_boundary_node_id}, bps_occupied: {current_snarl_boundary_bps_occupied}, additional_bps_to_cover: {additional_bps_to_cover}, extend_left: {extend_left}")
@@ -1228,6 +1244,7 @@ class AlignAnchor:
         return
 
 
+    @profile
     def update_current_anchor_details_with_new_boundary(self, current_extended_anchor: Anchor, current_nonextended_anchor: Anchor, best_subsequence_left_side_offset: int, best_subsequence_supporting_reads: list):
         current_extended_anchor.copy_from_anchor(current_nonextended_anchor)
         # Update the anchor's boundaries based on the best subsequence found
@@ -1249,6 +1266,7 @@ class AlignAnchor:
         return
 
 
+    @profile
     def extend_anchors_independently(self, snarl_ids_sorted: list, valid_anchors: list) -> list:
         """
         This function extends the anchors independently for each snarl.
@@ -1392,6 +1410,7 @@ class AlignAnchor:
         return valid_anchors
     
 
+    @profile
     def _helper_determine_if_snarl_underwent_independent_extension(self, current_snarl_anchors: list) -> bool:
 
         #check if current snarl underwent independent extension
@@ -1406,6 +1425,7 @@ class AlignAnchor:
         return False
     
 
+    @profile
     def _helper_fetch_list_of_anchor_sequences(self, current_snarl_anchors: list) -> list:
         """
         This function extracts the sequence of the anchor from the fasta file.
@@ -1431,6 +1451,7 @@ class AlignAnchor:
         return current_snarl_anchors_sequence_list
     
 
+    @profile
     def _helper_extract_canonical_signature(self, anchor_seq: str, repeat_segments_offsets_list: list) -> tuple:
         """
         This function extracts the canonical signature of an anchor sequence, which is the sequence of the anchor sequence
@@ -1448,6 +1469,7 @@ class AlignAnchor:
         return tuple(canonical_signature_list)
 
 
+    @profile
     def _helper_find_low_complexity_regions(self, anchor_seq: str, w: int, t: int) -> list:
         """
         This function uses the `sdust` tool (https://github.com/lh3/sdust) to find low-complexity region ranges in a sequence
@@ -1485,6 +1507,7 @@ class AlignAnchor:
         return intervals
 
 
+    @profile
     def prune_repeat_anchors(self, snarl_ids_sorted: list, valid_anchors: list) -> list:
         """
         This function prunes repeat anchors from the valid_anchors list.
@@ -1762,11 +1785,13 @@ class AlignAnchor:
         return valid_anchor_extended
 
 
+    @profile
     def next_handle_iteratee(self, next_boundary):
         self.next_handle_expand_boundary = next_boundary
         # returning False as there is just 1 node connected when the degree is 1.
         return False
     
+    @profile
     def _prepare_snarl_id_chunks_for_parallel_processing(self) -> list[list]:
         """
         Divide the snarl IDs list into chunks. Also return a list of snarl to anchors dictionary for each chunk.
@@ -1792,6 +1817,7 @@ class AlignAnchor:
         return chunk_snarl_ids_list
     
 
+    @profile
     def merge_reliability_checking_results(self, results, file_paths, reliable_snarls_out_file_path=None):
         """
         Merge the results from a worker process into the main AlignAnchor instance.
@@ -2156,6 +2182,7 @@ class AlignAnchor:
         return linked_snarl_counts
 
 
+    @profile
     def _is_other_superset_of_primary(self, primary_sets: list, other_sets: list) -> bool:
         """
         Check if the primary sets are a superset of the other sets.
@@ -2171,6 +2198,7 @@ class AlignAnchor:
         return True
 
 
+    @profile
     def _are_unequal_number_of_sets_compatible(self, primary_sets: list, other_sets: list) -> bool:
         """
         Check if two sets are compatible when the cardinality of sets is different.
@@ -2181,6 +2209,7 @@ class AlignAnchor:
         return False
        
 
+    @profile
     def _compute_nk_for_linked_pair(self, snarl_a: str, snarl_b: str) -> tuple:
         """
         For two linked snarls, compute n (total shared reads) and k = max(n00+n11, n01+n10).
@@ -2225,6 +2254,57 @@ class AlignAnchor:
         k = max(n00 + n11, n01 + n10)
         return (n, k)
 
+
+    @profile
+    def _are_sets_equal_gtest(self, primary_sets, other_sets, num_common_reads):
+        """
+        Check if the two sets are permutation equivalent using the G-test.
+        """
+        if len(primary_sets) != len(other_sets):
+            return (False, "False_setsUnequal", num_common_reads)
+
+        tangle_matrix = [[len(primary_set & other_set) for other_set in other_sets] for primary_set in primary_sets]
+        gtest = GTest(tangle_matrix, settings.DETANGLE_GTEST_EPSILON)
+        if not gtest.success or len(gtest.hypotheses) == 0:
+            return (False, "False_gtestFailed", num_common_reads)
+        if not (gtest.hypotheses[0].isForwardInjective() and gtest.hypotheses[0].isBackwardInjective()):
+            return (False, "False_bestHypothesisNotABijective", num_common_reads)
+        if gtest.hypotheses[0].G > settings.DETANGLE_MAX_LOG_P:
+            return (False, f"False_bestHypothesisGTooHigh {round(gtest.hypotheses[0].G, 2)} > {settings.DETANGLE_MAX_LOG_P}", num_common_reads)
+        if (len(gtest.hypotheses) > 1) and (gtest.hypotheses[1].G - gtest.hypotheses[0].G < settings.DETANGLE_MIN_LOG_P_DELTA):
+            return (False, f"False_hypothesesNotWellSeparated {round(gtest.hypotheses[1].G - gtest.hypotheses[0].G, 2)} < {settings.DETANGLE_MIN_LOG_P_DELTA}", num_common_reads)
+        return (True, "True", num_common_reads)
+
+    @profile
+    def _are_sets_equal_with_error_tolerance(self, primary_sets, other_sets, num_common_reads, error_tolerance=0.1):
+        """
+        Check if two sets are equal with error tolerance.
+        """
+        if len(primary_sets) != len(other_sets):
+            return (False, "False_setsUnequal", num_common_reads)
+        other_sets_copy = copy.deepcopy(other_sets)
+        for primary_set in primary_sets:
+            best_matched_intersection_set_size = 0
+            best_matched_other_set = None
+            for other_set in other_sets_copy:
+                intersection_set = primary_set & other_set
+                tolerated_error_read_count_primary = len(primary_set) * error_tolerance
+                tolerated_error_read_count_other = len(other_set) * error_tolerance
+                if (len(primary_set) - len(intersection_set) <= tolerated_error_read_count_primary) and (len(other_set) - len(intersection_set) <= tolerated_error_read_count_other):
+                    if len(intersection_set) > best_matched_intersection_set_size:
+                        best_matched_intersection_set_size = len(intersection_set)
+                        best_matched_other_set = other_set
+            if best_matched_intersection_set_size == 0:
+                return (False, "False", num_common_reads)
+            other_sets_copy.remove(best_matched_other_set)
+        for primary_set in primary_sets:
+            if settings.ENABLE_REFINED_PROBABILISTIC_RELIABILITY_CHECKING:
+                if len(primary_set) < 1:
+                    return (False, "False_lowCov", num_common_reads)
+            else:
+                if len(primary_set) < settings.MIN_READS_FOR_PARTITION_COMPATIBILITY:
+                    return (False, "False_lowCov", num_common_reads)
+        return (True, "True", num_common_reads)
 
     @profile
     def _are_snarls_compatible(self, primary_snarl: str, other_snarl: str, snarl_read_partitions_dict: dict=None) -> tuple[bool, str, int | None, int | None]:
@@ -2299,77 +2379,14 @@ class AlignAnchor:
                         "other": [list(s) for s in other_sets]
                     }
 
-        def _are_sets_equal_gtest(primary_sets, other_sets):
-            """
-            Check if the two sets are permutation equivalent using the G-test.
-            """
-            if len(primary_sets) != len(other_sets):
-                return (False, "False_setsUnequal", num_common_reads)
-
-            tangle_matrix = [[len(primary_set & other_set) for other_set in other_sets] for primary_set in primary_sets]
-            gtest = GTest(tangle_matrix, settings.DETANGLE_GTEST_EPSILON)
-            if not gtest.success or len(gtest.hypotheses) == 0:   # will happen if the tangle matrix is too large (more than 16 entries) or if there are no hypotheses (can only happen when tangle matrix has 0 entries)
-                return (False, "False_gtestFailed", num_common_reads)
-            if not (gtest.hypotheses[0].isForwardInjective() and gtest.hypotheses[0].isBackwardInjective()):    # means that the best hypothes is bijective (both injective and surjective)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
-                return (False, "False_bestHypothesisNotABijective", num_common_reads)
-            if gtest.hypotheses[0].G > settings.DETANGLE_MAX_LOG_P:
-                return (False, f"False_bestHypothesisGTooHigh {round(gtest.hypotheses[0].G, 2)} > {settings.DETANGLE_MAX_LOG_P}", num_common_reads)
-            if (len(gtest.hypotheses) > 1) and (gtest.hypotheses[1].G - gtest.hypotheses[0].G < settings.DETANGLE_MIN_LOG_P_DELTA):
-                return (False, f"False_hypothesesNotWellSeparated {round(gtest.hypotheses[1].G - gtest.hypotheses[0].G, 2)} < {settings.DETANGLE_MIN_LOG_P_DELTA}", num_common_reads)
-            
-            # # We need to understand why the snarls were compatible. Whether it was exactly [[0,16],[18,0]], i.e. tangle matrix with 0s, or it had some errors, e.g. [[16,2],[0,16]].
-            # best_hypothesis = gtest.hypotheses[0]
-            # # get indices of False in the best_hypothesis.connectivityMatrix
-            # false_indices = [(i, j) for i, row in enumerate(best_hypothesis.connectivityMatrix) for j, value in enumerate(row) if not value]
-            # if len(false_indices) == 0:
-            #     return (True, "True_tangleMatrixWith0s")
-            # else:
-            #     return (True, "True_tangleMatrixWithErrors")
-
-            return (True, "True", num_common_reads)
-        
-        @profile
-        def _are_sets_equal_with_error_tolerance(primary_sets, other_sets, error_tolerance=0.1):
-            """
-            Check if two sets are equal with error tolerance.
-            """
-            if len(primary_sets) != len(other_sets):
-                return (False, "False_setsUnequal", num_common_reads)
-                # return (self._are_unequal_number_of_sets_compatible(primary_sets, other_sets) if settings.ENABLE_UNEQUAL_SET_COMPATIBILITY else False)
-            other_sets_copy = copy.deepcopy(other_sets)
-            for primary_set in primary_sets:
-                best_matched_intersection_set_size = 0
-                best_matched_other_set = None
-                for other_set in other_sets_copy:
-                    intersection_set = primary_set & other_set 
-                    tolerated_error_read_count_primary = len(primary_set) * error_tolerance
-                    tolerated_error_read_count_other = len(other_set) * error_tolerance
-                    if (len(primary_set) - len(intersection_set) <= tolerated_error_read_count_primary) and (len(other_set) - len(intersection_set) <= tolerated_error_read_count_other):
-                        if len(intersection_set) > best_matched_intersection_set_size:
-                            best_matched_intersection_set_size = len(intersection_set)
-                            best_matched_other_set = other_set
-                if best_matched_intersection_set_size == 0:
-                    return (False, "False", num_common_reads)
-                other_sets_copy.remove(best_matched_other_set)
-            # Check if all read sets are above a coverage threshold
-            for primary_set in primary_sets:
-                if settings.ENABLE_REFINED_PROBABILISTIC_RELIABILITY_CHECKING:
-                    # For refine probabilistic method, we don't need to pre-filter by coverage. The probability calculation will take care of this.
-                    if len(primary_set) < 1:
-                        return (False, "False_lowCov", num_common_reads)
-                else:
-                    if len(primary_set) < settings.MIN_READS_FOR_PARTITION_COMPATIBILITY:
-                        return (False, "False_lowCov", num_common_reads) # if the primary set has less than MIN_READS_FOR_PARTITION_COMPATIBILITY, then the partitions are not compatible
-            return (True, "True", num_common_reads)
-
         if settings.USE_GTEST_FOR_PARTITION_COMPATIBILITY:
-            is_compatible, desc, _ = _are_sets_equal_gtest(primary_sets, other_sets)
+            is_compatible, desc, _ = self._are_sets_equal_gtest(primary_sets, other_sets, num_common_reads)
             if is_compatible:
                 return (True, "True", num_common_reads, primary_partition_k)
             else:
                 return (False, desc, num_common_reads, primary_partition_k)
 
-        is_compatible, desc, _ = _are_sets_equal_with_error_tolerance(primary_sets, other_sets, error_tolerance=settings.ERROR_TOLERANCE_IN_COMPATIBILITY_CHECK)
+        is_compatible, desc, _ = self._are_sets_equal_with_error_tolerance(primary_sets, other_sets, num_common_reads, error_tolerance=settings.ERROR_TOLERANCE_IN_COMPATIBILITY_CHECK)
         if is_compatible:
             return (True, "True", num_common_reads, primary_partition_k)
         else:
@@ -2615,6 +2632,7 @@ class AlignAnchor:
         return results_dict
 
 
+    @profile
     def print_extended_anchor_info(self, out_f) -> None:
         with open(out_f, "w") as f:
             print(f"Sentinel_node\tsnarl_id\tAnchor_length\tAnchor_pos_in_ref_path\tAnchor_path\tAnchor_nodes_copypaste_bandage\tPaths_associated_with_anchor\tbp_matched_reads",file=f)
@@ -2626,6 +2644,7 @@ class AlignAnchor:
                 )
 
 
+    @profile
     def print_sentinels_for_bandage(self, file) -> None:
         with open(file, "w") as out_f:
             print("Node,color", file=out_f)
@@ -2634,6 +2653,7 @@ class AlignAnchor:
                     print(f"{node.id},#e25759", file=out_f)
 
 
+    @profile
     def dump_snarls_and_anchors_in_reads_dict(self, out_file_path: str) -> None:
         """
         Builds a nested dictionary mapping read IDs to their snarls and anchors,
@@ -2654,6 +2674,7 @@ class AlignAnchor:
         dump_to_jsonl(snarls_anchors_in_reads_dict, out_file_path)
 
     
+    @profile
     def dump_dictionary_with_reads_counts(self, out_file_path: str) -> None:
         """
         It writes the anchor dictionary with the count of alinged reads for each anchor
@@ -2777,6 +2798,7 @@ class AlignAnchor:
         return results, read_id      # After finding all anchors for a read, return the results
 
 
+@profile
 def dump_to_jsonl(object, out_file_path: str):
     """
     It dumps the object to json structure.
@@ -2790,6 +2812,7 @@ def dump_to_jsonl(object, out_file_path: str):
         json.dump(object, f, ensure_ascii=False, indent=4)
 
 
+@profile
 def verify_path_concordance(
     # self,
     alignment_position: int,

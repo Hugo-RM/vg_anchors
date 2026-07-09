@@ -40,6 +40,7 @@ class AnchorDictionary:
                     <4<3<2<1    Node with ID == 2 is the sentinel of this path
     """
 
+    @profile
     def __init__(self) -> None:
         # useful initialization objects
         self.graph = PackedGraph()
@@ -88,6 +89,7 @@ class AnchorDictionary:
         self.index.deserialize(index_path)
         print(f"Graph files loaded in {time.time()-t0:.2f}", file=stderr)
 
+    @profile
     def check_snarl_in_children_iteratee(self, child_net_handle) -> bool:
         """
         It iterates on the children of each snarl child (check ) to verify that the snalr does not contain any other snarl and is therefore a snarl leave. If it seesa a snarl it sets the variable contains_child_snarls as true.
@@ -110,6 +112,7 @@ class AnchorDictionary:
 
         return True
 
+    @profile
     def check_leaf_snarl_iteratee(self, net_handle) -> bool:
         """
         This function is called on the snarl tree traversal (process_snarls function) when the pointer is on a snarl net_handle. It verifies if the snarl is a leaf snalr (does not contain inside it another snarl like a matrioska).
@@ -163,6 +166,7 @@ class AnchorDictionary:
         return None
 
 
+    @profile
     def traverse_step_iteratee(self, step_handle) -> bool:
         """
         This function takes a step_handle in the graph and appends the nodes (of the path associated to that step) that are in the snarl. An anchor is a path in a snarl. 
@@ -279,6 +283,7 @@ class AnchorDictionary:
         return True
 
 
+    @profile
     def get_edge_snarl(self, snarl_net_handle, extend=False) -> None:
         """
         This function takes a snarl_net_handle (from a list of leaf snarls), computes their boundary nodes along with nodes inside it. It populates FORWARD and REVERSE snarl 
@@ -321,6 +326,7 @@ class AnchorDictionary:
         )
         return
 
+    @profile
     def print_anchor_boundaries_dict(self, file_path):
         if settings.DEBUG:
             print(f"Printing to {file_path}.forward_dict.csv")
@@ -337,6 +343,7 @@ class AnchorDictionary:
                     f"{el},{self.snarl_boundaries[settings.REVERSE_DICTIONARY][el][settings.END_NODE_POS]},{self.snarl_boundaries[settings.REVERSE_DICTIONARY][el][2]}", file=f
                 )
 
+    @profile
     def collect_path_handles(self, step_handle):
         path_handle = self.graph.get_path_handle_of_step(step_handle)
         self.path_names.append(self.graph.get_path_name(path_handle))  # self.graph.get_path_name()
@@ -458,6 +465,7 @@ class AnchorDictionary:
 
     ### HELPER FUNCTIONS ###
 
+    @profile
     def get_nodes_in_snarl(self, snarl_net_handle) -> list:
         nodes_inside = []
 
@@ -470,6 +478,7 @@ class AnchorDictionary:
 
         return nodes_inside  # Return the collected node IDs
 
+    @profile
     def get_snarl_boundaries_handle(self, snarl_net_handle) -> tuple:
         """
         This function takes a snarl net_handle and returns the boundary nodes of the snarl, i.e. preceding and succeding the snarl. This is used in the candidate anchor generation when traversing the paths to record only the portion of path in the snarl.
@@ -588,6 +597,7 @@ class AnchorDictionary:
 
 
 
+    @profile
     def get_snarl_boundaries_extend(self, snarl_net_handle) -> tuple:
         """
         This function takes a snarl net_handle and returns the boundary nodes of the snarl, i.e. preceding and succeding the snarl, allowing for boundary extension in case the boundary nodes length is not enough to generate an anchor. 
@@ -651,6 +661,7 @@ class AnchorDictionary:
             boundary = (other_computed_handle, computed_handle, nodes_inside_snarl_extended) if go_left else (computed_handle, other_computed_handle, nodes_inside_snarl)
         return boundary
     
+    @profile
     def expand_bounary(self, current_handle, go_left_bool, nodes_inside_snarl):
         while self.anchor_length_occupied < settings.MIN_ANCHOR_LENGTH:
             current_handle_id = self.graph.get_id(current_handle)
@@ -680,12 +691,14 @@ class AnchorDictionary:
         return current_handle, nodes_inside_snarl
     
 
+    @profile
     def next_handle_iteratee(self, next_boundary):
         self.next_handle_expand_boundary = next_boundary
         # returning False as there is just 1 node connected when the degree is 1.
         return False
 
 
+    @profile
     def steps_path_iteratee(self, step_handle) -> bool:
         """
         This function is applied to the walk in the path and is used to generate a list of steps, defined as list of nodes and their relative position in the path. 
@@ -716,11 +729,13 @@ class AnchorDictionary:
         return True
 
 
+    @profile
     def dump_dictionary(self, out_file_path: str) -> None:
         with open(out_file_path, "wb") as out_f:
             pickle.dump(self.sentinel_to_anchor, out_f)
 
 
+    @profile
     def add_positions_to_anchors(self, graph_path_name: str = "") -> None:
         """
         This function populates the anchors with their (average) position in the CHM13 path
@@ -769,6 +784,7 @@ class AnchorDictionary:
 
     ### PRINTING FUNCTIONS FOR DEBUG - VISUALIZATION ###
 
+    @profile
     def print_sentinels_for_bandage(self, file) -> None:
         sentinel_nodes_set = set()
         for _, anchor_list in self.sentinel_to_anchor.items():
@@ -781,6 +797,7 @@ class AnchorDictionary:
             for node in sentinel_nodes_set:
                 print(f"{node},#FF0000", file=out_f)
 
+    @profile
     def print_dict_sizes(self, out_f) -> None:
         with open(out_f, "w") as f:
             print(f"Sentinel_node\tsnarl_id\tAnchor_length\tAnchor_pos_in_ref_path\tAnchor_path\tAnchor_nodes_copypaste_bandage\tPaths_associated_with_anchor",file=f)
