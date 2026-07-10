@@ -85,21 +85,20 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
         print(f"######### FINDING RELIABLE SNARLS IN CURRENT CHUNK #########")
 
     t0 = time.time()
-    # Create valid anchors within the current chunk
-    valid_anchors_in_current_chunk = []
-
-    for snarl_id in chunk_snarl_list:
-        anchors = shared_align_anchor.snarl_to_anchors_dictionary[snarl_id]
-        for anchor in anchors:
-            # TODO: Check memory address of an anchor if it matches the one in the shared memory
-            read_info = [
-                [read[0], read[1], read[2], read[3]]
-                for read in anchor.bp_matched_reads
-            ]
-            valid_anchors_in_current_chunk.append([anchor, read_info])
+    # Not sure why this is here — find_reliable_snarls doesn't use valid_anchors internally.
+    # Commenting out to check if it improves performance; uncomment if this data is needed again.
+    # valid_anchors_in_current_chunk = []
+    # for snarl_id in chunk_snarl_list:
+    #     anchors = shared_align_anchor.snarl_to_anchors_dictionary[snarl_id]
+    #     for anchor in anchors:
+    #         read_info = [
+    #             [read[0], read[1], read[2], read[3]]
+    #             for read in anchor.bp_matched_reads
+    #         ]
+    #         valid_anchors_in_current_chunk.append([anchor, read_info])
 
     result = shared_align_anchor.find_reliable_snarls(
-        valid_anchors=valid_anchors_in_current_chunk, snarl_list=chunk_snarl_list
+        valid_anchors=[], snarl_list=chunk_snarl_list
     )
 
     if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
