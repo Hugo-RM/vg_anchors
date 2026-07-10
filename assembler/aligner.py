@@ -3174,7 +3174,7 @@ def verify_sequence_agreement(
         The end of the anchor in the read / 0 if does not match completely
     """
     
-    print_to_debug = False
+    # print_to_debug = False
 
     # If anchor overflows the alingment, it is not valid
     if anchor_bp_end > end_in_path or anchor_bp_start < start_in_path or anchor_bp_end < anchor_bp_start:
@@ -3189,8 +3189,8 @@ def verify_sequence_agreement(
     allow_seq_diff: bool = (
         True  # I need this to control no variation between anchor and sequence is present. Starting with True, setting to False when walking on anchor coordinates
     )
-    if print_to_debug:
-        print(f"DEBUG: Initially, walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}, allow_seq_diff = {allow_seq_diff}")
+    # if print_to_debug:
+    #     print(f"DEBUG: Initially, walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}, allow_seq_diff = {allow_seq_diff}")
 
     # When walking on alingment. Path length is calculated as 'equal + subst + delition'
     # When walking on alingment. Read length is calculated as 'equal+subst+insertion'
@@ -3198,9 +3198,9 @@ def verify_sequence_agreement(
     total_matched_bps = 0
     for step in cs_walk:
 
-        if print_to_debug:
-            print(f"DEBUG: walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}")
-            print(f"DEBUG: step = {step}")
+        # if print_to_debug:
+        #     print(f"DEBUG: walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}")
+        #     print(f"DEBUG: step = {step}")
         if step[0] == "+":
             walked_in_the_sequence += step[1]
         elif step[0] == ":":
@@ -3216,21 +3216,21 @@ def verify_sequence_agreement(
             # I passed the start of the anchor and I was on a difference step. Anchor not good
             if step[0] != ":":
                 return (False, 0, 0, 0, 0, 0)
-            if print_to_debug:
-                print(f"DEBUG: Just passed start of anchor, walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}")
+            # if print_to_debug:
+            #     print(f"DEBUG: Just passed start of anchor, walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}")
             # If I passed on a equal step, it is ok. I set allow_differences to false and go on. But before I check if I have surpassed the end of the anchor. If yes return true.
             total_matched_bps = step[1]
-            if print_to_debug:
-                print(f"DEBUG: Inside passed start of anchor, total_matched_bps in this cs_step (same as step size) = {total_matched_bps}")
+            # if print_to_debug:
+            #     print(f"DEBUG: Inside passed start of anchor, total_matched_bps in this cs_step (same as step size) = {total_matched_bps}")
             if walked_in_the_path >= walk_end_for_cs_matching:
-                if print_to_debug:
-                    print(f"DEBUG: End of anchor in same cs_step as start of anchor, as walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}, walk_end_for_cs_matching = {walk_end_for_cs_matching}")
+                # if print_to_debug:
+                #     print(f"DEBUG: End of anchor in same cs_step as start of anchor, as walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}, walk_end_for_cs_matching = {walk_end_for_cs_matching}")
                 diff_start = walked_in_the_path - anchor_bp_start
                 diff_end = walked_in_the_path - anchor_bp_end
-                if print_to_debug:
-                    print(f"DEBUG: diff_start = {diff_start}, diff_end = {diff_end}")
-                if print_to_debug:
-                    print(f"DEBUG: returning True, read_start = {walked_in_the_sequence - diff_start}, read_end = {walked_in_the_sequence - diff_end}, match_limit = {total_matched_bps}, cs_left_avail = {total_matched_bps - diff_start}, cs_right_avail = {diff_end}")
+                # if print_to_debug:
+                #     print(f"DEBUG: diff_start = {diff_start}, diff_end = {diff_end}")
+                # if print_to_debug:
+                #     print(f"DEBUG: returning True, read_start = {walked_in_the_sequence - diff_start}, read_end = {walked_in_the_sequence - diff_end}, match_limit = {total_matched_bps}, cs_left_avail = {total_matched_bps - diff_start}, cs_right_avail = {diff_end}")
                 # I add a + 1 in the read_end position because of Shasta requirement that the interval is open at the end. The end id in the sequence is of the first nucleotide after the anchor
                 # TODO: Currently end_node_pos causes a gap when anchor end node is even #base-pairs.
                 return (
