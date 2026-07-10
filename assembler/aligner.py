@@ -77,7 +77,7 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     """
     Worker function to run reliable snarl finding on each snarl chunk
     """
-    if hasattr(profile, '_profile'):
+    if hasattr(profile, '_profile') and profile._profile is not None:
         profile.enable()
     global shared_align_anchor
 
@@ -105,7 +105,7 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
         print(f".. Processed {len(chunk_snarl_list)} snarls in {time.time() - t0}s", flush=True, file=stderr)
 
-    if hasattr(profile, '_profile'):
+    if hasattr(profile, '_profile') and profile._profile is not None:
         profile._profile.dump_stats(f"worker_snarl_{os.getpid()}.lprof")
     return result
 
@@ -214,15 +214,21 @@ class AlignAnchor:
         
         self.fasta_path = fasta_path
         self.read_sequences = {}
+        lines = []
         with open(fasta_path, "r") as f:
             read_name = None
             for line in f:
                 if line.startswith(">"):
+                    if read_name is not None:
+                        self.read_sequences[read_name] = "".join(lines)
                     read_name = line.strip().split()[0][1:]
-                    self.read_sequences[read_name] = ""
+                    lines = []
                 elif read_name:
-                    self.read_sequences[read_name] += line.strip()
+                    lines.append(line.strip())
+            if read_name is not None:
+                self.read_sequences[read_name] = "".join(lines)
         
+
         if self.read_id_map:
             self.read_sequences = {self.read_id_map.get(name): seq for name, seq in self.read_sequences.items() if self.read_id_map.get(name) is not None}
 

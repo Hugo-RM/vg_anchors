@@ -48,7 +48,7 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     Worker function to process a chunk of GAF lines.
     This function is executed in a separate process.
     """
-    if hasattr(profile, '_profile'):
+    if hasattr(profile, '_profile') and profile._profile is not None:
         profile.enable()
     global shared_align_anchor
 
@@ -95,7 +95,7 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
         print(f" ..Processed {len(gaf_chunk_lines)} lines in {time.time()-t0:.2f}s", file=stderr)
 
-    if hasattr(profile, '_profile'):
+    if hasattr(profile, '_profile') and profile._profile is not None:
         profile._profile.dump_stats(f"worker_gaf_{os.getpid()}.lprof")
     # Return the collected results from this worker.
     return {
