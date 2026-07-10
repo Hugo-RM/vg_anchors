@@ -2357,21 +2357,23 @@ class AlignAnchor:
         """
         if len(primary_sets) != len(other_sets):
             return (False, "False_setsUnequal", num_common_reads)
-        other_sets_copy = copy.deepcopy(other_sets)
+        matched = [False] * len(other_sets)
         for primary_set in primary_sets:
             best_matched_intersection_set_size = 0
-            best_matched_other_set = None
-            for other_set in other_sets_copy:
+            best_matched_idx = -1
+            for i, other_set in enumerate(other_sets):
+                if matched[i]:
+                    continue
                 intersection_set = primary_set & other_set
                 tolerated_error_read_count_primary = len(primary_set) * error_tolerance
                 tolerated_error_read_count_other = len(other_set) * error_tolerance
                 if (len(primary_set) - len(intersection_set) <= tolerated_error_read_count_primary) and (len(other_set) - len(intersection_set) <= tolerated_error_read_count_other):
                     if len(intersection_set) > best_matched_intersection_set_size:
                         best_matched_intersection_set_size = len(intersection_set)
-                        best_matched_other_set = other_set
-            if best_matched_intersection_set_size == 0:
+                        best_matched_idx = i
+            if best_matched_idx == -1:
                 return (False, "False", num_common_reads)
-            other_sets_copy.remove(best_matched_other_set)
+            matched[best_matched_idx] = True
         for primary_set in primary_sets:
             if settings.ENABLE_REFINED_PROBABILISTIC_RELIABILITY_CHECKING:
                 if len(primary_set) < 1:
