@@ -2438,6 +2438,11 @@ class AlignAnchor:
             if len(primary_sets) == 2
             else None
         )
+        other_partition_k = (
+            max(len(s) for s in other_sets)
+            if len(other_sets) == 2
+            else None
+        )
 
         # print(f"Current primary snarl: {primary_snarl}, other snarl: {other_snarl}")
         # print(f"..Primary sets: {primary_sets}")
@@ -2457,15 +2462,15 @@ class AlignAnchor:
         if settings.USE_GTEST_FOR_PARTITION_COMPATIBILITY:
             is_compatible, desc, _ = self._are_sets_equal_gtest(primary_sets, other_sets, num_common_reads)
             if is_compatible:
-                return (True, "True", num_common_reads, primary_partition_k)
+                return (True, "True", num_common_reads, primary_partition_k, other_partition_k)
             else:
-                return (False, desc, num_common_reads, primary_partition_k)
+                return (False, desc, num_common_reads, primary_partition_k, other_partition_k)
 
         is_compatible, desc, _ = self._are_sets_equal_with_error_tolerance(primary_sets, other_sets, num_common_reads, error_tolerance=settings.ERROR_TOLERANCE_IN_COMPATIBILITY_CHECK)
         if is_compatible:
-            return (True, "True", num_common_reads, primary_partition_k)
+            return (True, "True", num_common_reads, primary_partition_k, other_partition_k)
         else:
-            return (False, desc, num_common_reads, primary_partition_k)
+            return (False, desc, num_common_reads, primary_partition_k, other_partition_k)
 
 
     @profile
@@ -2563,6 +2568,8 @@ class AlignAnchor:
 
             #### 2. Find compatible/incompatible linked snarls, or compute (n, k) for binomial mode
             for linked_snarl_id in linked_snarls_for_current_snarl:
+                if linked_snarl_id in local_linked_snarls_compatibility_dict.get(snarl_id, {}):
+                    continue
                 if linked_snarl_id not in local_linked_snarls_compatibility_dict:
                     local_linked_snarls_compatibility_dict[linked_snarl_id] = {}
                     if settings.ENABLE_PROBABILISTIC_RELIABILITY_CHECKING or settings.ENABLE_REFINED_PROBABILISTIC_RELIABILITY_CHECKING:
@@ -2592,7 +2599,7 @@ class AlignAnchor:
                         }
                     else:
                         kwargs = {}
-                    is_compatible, desc, num_common_reads, primary_partition_k = self._are_snarls_compatible(primary_snarl = snarl_id, other_snarl = linked_snarl_id, **kwargs)
+                    is_compatible, desc, num_common_reads, primary_partition_k, other_partition_k = self._are_snarls_compatible(primary_snarl = snarl_id, other_snarl = linked_snarl_id, **kwargs)
                     if is_compatible:
                         local_linked_snarls_compatibility_dict[snarl_id][linked_snarl_id] = True
                         local_linked_snarls_compatibility_dict[linked_snarl_id][snarl_id] = True
@@ -2609,6 +2616,7 @@ class AlignAnchor:
                         local_linked_snarls_common_read_counts_dict[linked_snarl_id][snarl_id] = num_common_reads
                     if settings.ENABLE_REFINED_PROBABILISTIC_RELIABILITY_CHECKING:
                         local_linked_snarls_partition_k_dict[snarl_id][linked_snarl_id] = primary_partition_k
+                        local_linked_snarls_partition_k_dict[linked_snarl_id][snarl_id] = other_partition_k
 
         #### 3. Find whether the current snarl is "reliable" using number of compatilible linked snarls        
         for idx in range(len(snarl_list)):
