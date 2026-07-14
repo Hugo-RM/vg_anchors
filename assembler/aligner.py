@@ -13,6 +13,7 @@ from typing import Union
 import assembler.helpers as helpers
 import re
 import math
+import bisect
 
 if not os.environ.get("MEMORY_PROFILE"):
     try:
@@ -2901,21 +2902,22 @@ class AlignAnchor:
                         # regardless of whether the sequence agrees below. One entry per read per anchor.
                         if settings.OUTPUT_LOGGING_FILES:
                             results["path_matched_reads"][(node_id, index)] = [read_id]
-                        x = (
-                            anchor,
-                            read_id,
-                            walk_start,
-                            walk_end,
-                            alignment_l[settings.CIGAR_POSITION],
-                            alignment_l[settings.START_POSITION],
-                            alignment_l[settings.END_POSITION],
-                            walk_start_for_cs_matching,
-                            walk_end_for_cs_matching,
-                            alignment_l[settings.READ_START_POS]
-                        )
 
                         is_aligning, read_start, read_end, match_limit, cs_start_pos, cs_end_pos = (
-                            verify_sequence_agreement(*x)
+                            verify_sequence_agreement(
+                                anchor,
+                                read_id,
+                                walk_start,
+                                walk_end,
+                                alignment_l[settings.CIGAR_POSITION],
+                                alignment_l[settings.START_POSITION],
+                                alignment_l[settings.END_POSITION],
+                                walk_start_for_cs_matching,
+                                walk_end_for_cs_matching,
+                                alignment_l[settings.READ_START_POS],
+                                alignment_l[settings.CUM_PATH_POSITION],
+                                alignment_l[settings.CUM_SEQ_POSITION],
+                            )
                         )
                         # If paths is correct:
                         # I need to append the read info to the anchor.
@@ -3147,7 +3149,9 @@ def verify_sequence_agreement(
     end_in_path: int,
     walk_start_for_cs_matching: int,
     walk_end_for_cs_matching: int,
-    intialise_walked_in_the_sequence_to: int
+    intialise_walked_in_the_sequence_to: int,
+    _cum_path: list,
+    _cum_seq: list,
 ):
     """
     It uses the parsed cs tag from the gaf to verify that the anchor and the path match at the sequence level.
@@ -3164,43 +3168,62 @@ def verify_sequence_agreement(
         The alingment start in the path (from gaf)
     end_in_path: int
         The alingment end in the path (from gaf)
+    _cum_path: list
+        Prefix sums of path deltas from parse_cs_tag; length len(cs_walk)+1
+    _cum_seq: list
+        Prefix sums of seq deltas from parse_cs_tag; length len(cs_walk)+1
     Returns
     -------
-    boool
+    bool
         True if the path and read sequences matches in the anchor section
-    walked_in_the_sequence - diff_start: int
-        The start of the anchor in the read / 0 if does not match completely
-    walked_in_the_sequence - diff_end: int
-        The end of the anchor in the read / 0 if does not match completely
+    int
+        Start of the anchor in the read (0 if no match)
+    int
+        End of the anchor in the read (0 if no match)
+    int
+        Total matched base pairs
+    int
+        cs bases available to the left of the anchor
+    int
+        cs bases available to the right of the anchor
     """
-    
-    # print_to_debug = False
 
-    # If anchor overflows the alingment, it is not valid
+    # If anchor overflows the alignment, it is not valid
     if anchor_bp_end > end_in_path or anchor_bp_start < start_in_path or anchor_bp_end < anchor_bp_start:
         return (False, 0, 0, 0, 0, 0)
 
-    walked_in_the_sequence: int = (
-        intialise_walked_in_the_sequence_to  # I need this to keep track of anchor position in the sequence
-    )
-    walked_in_the_path: int = (
-        start_in_path  # I need this to keep track of my walk in the path
-    )
-    allow_seq_diff: bool = (
-        True  # I need this to control no variation between anchor and sequence is present. Starting with True, setting to False when walking on anchor coordinates
-    )
-    # if print_to_debug:
-    #     print(f"DEBUG: Initially, walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}, allow_seq_diff = {allow_seq_diff}")
+    # Binary-search the precomputed cumulative path offsets to find the cs step that first
+    # crosses anchor_bp_start, without iterating from step 0.
+    _target = anchor_bp_start - start_in_path
+    _k = bisect.bisect_right(_cum_path, _target)
+    if _k == 0 or _k > len(cs_walk):
+        return (False, 0, 0, 0, 0, 0)
+    _j = _k - 1
+    step = cs_walk[_j]
+    walked_in_the_path = start_in_path + _cum_path[_j + 1]
+    walked_in_the_sequence = intialise_walked_in_the_sequence_to + _cum_seq[_j + 1]
 
-    # When walking on alingment. Path length is calculated as 'equal + subst + delition'
-    # When walking on alingment. Read length is calculated as 'equal+subst+insertion'
-    # For the moment, strand can be assumed as positive
-    total_matched_bps = 0
-    for step in cs_walk:
+    # The step crossing anchor_bp_start must be a pure identity (":") step
+    if step[0] != ":":
+        return (False, 0, 0, 0, 0, 0)
 
-        # if print_to_debug:
-        #     print(f"DEBUG: walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}")
-        #     print(f"DEBUG: step = {step}")
+    total_matched_bps = step[1]
+    if walked_in_the_path >= walk_end_for_cs_matching:
+        # Anchor fits entirely within this one cs step
+        diff_start = walked_in_the_path - anchor_bp_start
+        diff_end = walked_in_the_path - anchor_bp_end
+        # TODO: Currently end_node_pos causes a gap when anchor end node is even #base-pairs.
+        return (
+            True,
+            walked_in_the_sequence - diff_start,
+            walked_in_the_sequence - diff_end,
+            total_matched_bps,
+            total_matched_bps - diff_start,
+            diff_end
+        )
+
+    # Anchor spans multiple cs steps. Continue from _j+1 in strict identity mode
+    for step in cs_walk[_j + 1:]:
         if step[0] == "+":
             walked_in_the_sequence += step[1]
         elif step[0] == ":":
@@ -3212,52 +3235,16 @@ def verify_sequence_agreement(
             walked_in_the_sequence += step[1]
             walked_in_the_path += step[1]
 
-        if walked_in_the_path > anchor_bp_start and allow_seq_diff:
-            # I passed the start of the anchor and I was on a difference step. Anchor not good
-            if step[0] != ":":
-                return (False, 0, 0, 0, 0, 0)
-            # if print_to_debug:
-            #     print(f"DEBUG: Just passed start of anchor, walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}")
-            # If I passed on a equal step, it is ok. I set allow_differences to false and go on. But before I check if I have surpassed the end of the anchor. If yes return true.
-            total_matched_bps = step[1]
-            # if print_to_debug:
-            #     print(f"DEBUG: Inside passed start of anchor, total_matched_bps in this cs_step (same as step size) = {total_matched_bps}")
-            if walked_in_the_path >= walk_end_for_cs_matching:
-                # if print_to_debug:
-                #     print(f"DEBUG: End of anchor in same cs_step as start of anchor, as walked_in_the_path = {walked_in_the_path}, walked_in_the_sequence = {walked_in_the_sequence}, walk_end_for_cs_matching = {walk_end_for_cs_matching}")
-                diff_start = walked_in_the_path - anchor_bp_start
-                diff_end = walked_in_the_path - anchor_bp_end
-                # if print_to_debug:
-                #     print(f"DEBUG: diff_start = {diff_start}, diff_end = {diff_end}")
-                # if print_to_debug:
-                #     print(f"DEBUG: returning True, read_start = {walked_in_the_sequence - diff_start}, read_end = {walked_in_the_sequence - diff_end}, match_limit = {total_matched_bps}, cs_left_avail = {total_matched_bps - diff_start}, cs_right_avail = {diff_end}")
-                # I add a + 1 in the read_end position because of Shasta requirement that the interval is open at the end. The end id in the sequence is of the first nucleotide after the anchor
-                # TODO: Currently end_node_pos causes a gap when anchor end node is even #base-pairs.
-                return (
-                    True,
-                    walked_in_the_sequence - diff_start,
-                    walked_in_the_sequence - diff_end,
-                    total_matched_bps,
-                    total_matched_bps - diff_start,
-                    diff_end
-                )
-            else:
-                allow_seq_diff = False  # go to the next step
-
-        # Walking in the anchor section and found a diff
-        elif not (allow_seq_diff) and step[0] != ":":
+        # Any non-identity step inside the anchor means no match
+        if step[0] != ":":
             return (False, 0, 0, 0, 0, 0)
 
-        # Walking inside an anchor (that spans multiple ":" tuples
-        elif walked_in_the_path > anchor_bp_start and walked_in_the_path < walk_end_for_cs_matching and step[0] == ":" and (not allow_seq_diff):
+        if walked_in_the_path > anchor_bp_start and walked_in_the_path < walk_end_for_cs_matching:
             total_matched_bps += step[1]
-
-        # I passed the end of the anchor and there was no difference
         elif walked_in_the_path >= walk_end_for_cs_matching:
             total_matched_bps += step[1]
             diff_start = walked_in_the_path - anchor_bp_start
             diff_end = walked_in_the_path - anchor_bp_end
-            # I add a + 1 in the read_end position because of Shasta requirement that the interval is open at the end. The end id in the sequence is of the first nucleotide after the anchor
             return (
                 True,
                 walked_in_the_sequence - diff_start,
@@ -3266,7 +3253,7 @@ def verify_sequence_agreement(
                 total_matched_bps - diff_start,
                 diff_end
             )
-
         elif walked_in_the_path > end_in_path:
             return (False, 0, 0, 0, 0, 0)
+
     return (False, 0, 0, 0, 0, 0)

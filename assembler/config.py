@@ -56,6 +56,8 @@ class _Config:
         self.NODE_POSITION = alignment_list_section.getint('NODE_POSITION')
         self.ORIENTATION_POSITION = alignment_list_section.getint('ORIENTATION_POSITION')
         self.CIGAR_POSITION = alignment_list_section.getint('CIGAR_POSITION')
+        self.CUM_PATH_POSITION = alignment_list_section.getint('CUM_PATH_POSITION')
+        self.CUM_SEQ_POSITION = alignment_list_section.getint('CUM_SEQ_POSITION')
 
         # [bp_matched_read_list]
         bp_matched_read_list_section = self.raw_config['bp_matched_read_list']
