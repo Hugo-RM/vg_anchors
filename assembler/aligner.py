@@ -1634,8 +1634,18 @@ class AlignAnchor:
         """
         anchors_to_remove = set()   # {(snarl_id, anchor)}
 
-        # NOTE: This step is adding to the overhead the most.
-        self.before_extension_snarl_to_anchors_dictionary = copy.deepcopy(self.snarl_to_anchors_dictionary)
+        # Targeted snapshot instead of copy.deepcopy(): only copies the two things extension
+        # actually mutates (_nodes list, bp_matched_reads inner lists) via Anchor._snapshot(),
+        # sharing everything else (Node objects, all other attrs) since they're never mutated
+        # in-place here. Also scoped to self.snarl_ids_sorted (reliable snarls only) instead
+        # of every snarl in the dictionary — before_extension_snarl_to_anchors_dictionary is
+        # only ever read for snarl IDs drawn from self.snarl_ids_sorted (see
+        # _helper_extension_loop / extend_anchors_independently call sites below), so
+        # snapshotting unreliable snarls' anchors would be wasted work.
+        self.before_extension_snarl_to_anchors_dictionary = {
+            sid: [a._snapshot() for a in self.snarl_to_anchors_dictionary[sid]]
+            for sid in self.snarl_ids_sorted
+        }
         
         ### First, performing perfect bp match extension (no read drop allowed) for all snarls
         if settings.DEBUG:

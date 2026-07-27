@@ -98,6 +98,21 @@ class Anchor:
     @profile
     def add_snarl_id(self, snarl_id) -> None:
         self.snarl_id = snarl_id
+
+    @profile
+    def _snapshot(self) -> 'Anchor':
+        """
+        Lightweight pre-extension snapshot used by extend_and_merge_snarls, in place of
+        copy.deepcopy(). During extension only two things are ever mutated in-place:
+        _nodes (via insert_node_through_extension) and the inner lists of bp_matched_reads
+        (via element assignment in _try_extension). Node objects and every other attribute
+        are never mutated, so sharing them instead of deep-copying is safe and much cheaper.
+        """
+        snap = Anchor.__new__(Anchor)
+        snap.__dict__.update(self.__dict__)
+        snap._nodes = self._nodes[:]
+        snap.bp_matched_reads = [r[:] for r in self.bp_matched_reads]
+        return snap
     
     @profile
     def __repr__(self) -> str:
