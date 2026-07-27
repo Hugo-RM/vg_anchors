@@ -138,6 +138,8 @@ def _process_each_snarl_chunk_in_worker_impl(chunk_snarl_list: list):
 
 
 if not os.environ.get("MEMORY_PROFILE"):
+    # See the matching comment in handler.py's _process_gaf_chunk_impl for why this is
+    # conditional rather than a static @profile on the function above.
     _process_each_snarl_chunk_in_worker_impl = profile(_process_each_snarl_chunk_in_worker_impl)
 
 
