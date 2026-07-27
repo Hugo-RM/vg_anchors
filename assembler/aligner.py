@@ -2210,7 +2210,7 @@ class AlignAnchor:
         return potentially_linked_snarls_list
 
 
-    def _find_linked_snarls_for_current_snarl(self, current_snarl_id: str, snarl_list: list, local_snarl_pos_in_read_dict: dict=None, local_snarl_coverage_dict: dict=None, local_snarl_allelic_coverage_dict: dict=None) -> dict:
+    def _find_linked_snarls_for_current_snarl(self, current_snarl_id: str, snarl_list: list, local_snarl_pos_in_read_dict: dict=None, local_snarl_coverage_dict: dict=None, local_snarl_allelic_coverage_dict: dict=None, snarl_anchor_sets_cache: dict=None, snarl_all_reads_cache: dict=None) -> dict:
         """
         Find snarls linked to the current snarl and count the common reads. 
         For S an informative linked snarl T is one such that there exist at least k shared reads
@@ -2220,12 +2220,18 @@ class AlignAnchor:
         """
         linked_snarl_counts = {}
 
-        # Precompute read sets for each anchor in the current snarl
-        current_snarl_anchor_sets = [
-            {read[0] for read in anchor.bp_matched_reads}
-            for anchor in self.snarl_to_anchors_dictionary[current_snarl_id]
-        ]
-        all_current_reads = set().union(*current_snarl_anchor_sets)
+        # Read sets for each anchor in the current snarl — cached across calls, since the
+        # same snarl's anchors get scanned again every time it turns up as someone else's
+        # linked snarl (~100x on average) and again in every _are_snarls_compatible call.
+        if current_snarl_id not in snarl_anchor_sets_cache:
+            built = [
+                {read[settings.READ_ID] for read in anchor.bp_matched_reads}
+                for anchor in self.snarl_to_anchors_dictionary[current_snarl_id]
+            ]
+            snarl_anchor_sets_cache[current_snarl_id] = built
+            snarl_all_reads_cache[current_snarl_id] = set().union(*built)
+        current_snarl_anchor_sets = snarl_anchor_sets_cache[current_snarl_id]
+        all_current_reads = snarl_all_reads_cache[current_snarl_id]
 
         # Populate the snarl_coverage dictionary
         if local_snarl_coverage_dict is not None:
@@ -2258,20 +2264,22 @@ class AlignAnchor:
             if other_snarl_id == current_snarl_id:
                 continue  # skip self-comparison
 
-            other_snarl_anchors = self.snarl_to_anchors_dictionary[other_snarl_id]
-            # Precompute read sets for other snarl anchors
-            other_snarl_anchor_sets = [
-                {read[0] for read in anchor.bp_matched_reads}
-                for anchor in other_snarl_anchors
-            ]
-            all_other_reads = set().union(*other_snarl_anchor_sets)
+            if other_snarl_id not in snarl_anchor_sets_cache:
+                built = [
+                    {read[settings.READ_ID] for read in anchor.bp_matched_reads}
+                    for anchor in self.snarl_to_anchors_dictionary[other_snarl_id]
+                ]
+                snarl_anchor_sets_cache[other_snarl_id] = built
+                snarl_all_reads_cache[other_snarl_id] = set().union(*built)
+            other_snarl_anchor_sets = snarl_anchor_sets_cache[other_snarl_id]
+            all_other_reads = snarl_all_reads_cache[other_snarl_id]
 
             shared_reads = all_current_reads & all_other_reads
             total_common_reads = len(shared_reads)
 
             if total_common_reads < settings.MIN_SNARL_LINKAGE_THRESHOLD:
                 continue
-            
+
             # Check that shared reads are partitioned into at least two alleles in the current snarl
             current_snarl_partitions = sum(1 for anchor_read_set in current_snarl_anchor_sets if anchor_read_set & shared_reads)
             if current_snarl_partitions < 2:
@@ -2441,7 +2449,7 @@ class AlignAnchor:
                     return (False, "False_lowCov", num_common_reads)
         return (True, "True", num_common_reads)
 
-    def _are_snarls_compatible(self, primary_snarl: str, other_snarl: str, snarl_read_partitions_dict: dict=None) -> tuple[bool, str, int | None, int | None]:
+    def _are_snarls_compatible(self, primary_snarl: str, other_snarl: str, snarl_read_partitions_dict: dict=None, snarl_anchor_sets_cache: dict=None, snarl_all_reads_cache: dict=None) -> tuple[bool, str, int | None, int | None]:
         """
         Check if two snarls are compatible:
         S and T linked snarls are consistent if the partition of the shared reads is the "same" in both.
@@ -2459,32 +2467,34 @@ class AlignAnchor:
                 - An integer representing the size of one side of the primary snarl's partition among shared reads (k in probability formula), or None if not a binary bubble
         """
 
-        # Collect all read IDs in other_snarl
-        other_snarl_reads = {
-            read[settings.READ_ID]
-            for anchor in self.snarl_to_anchors_dictionary[other_snarl]
-            for read in anchor.bp_matched_reads
-        }
+        # Anchor read sets for both snarls — cached (see find_reliable_snarls) instead of
+        # rebuilt from anchor.bp_matched_reads on every one of the ~71k calls this makes.
+        if primary_snarl not in snarl_anchor_sets_cache:
+            built = [
+                {read[settings.READ_ID] for read in anchor.bp_matched_reads}
+                for anchor in self.snarl_to_anchors_dictionary[primary_snarl]
+            ]
+            snarl_anchor_sets_cache[primary_snarl] = built
+            snarl_all_reads_cache[primary_snarl] = set().union(*built)
+        if other_snarl not in snarl_anchor_sets_cache:
+            built = [
+                {read[settings.READ_ID] for read in anchor.bp_matched_reads}
+                for anchor in self.snarl_to_anchors_dictionary[other_snarl]
+            ]
+            snarl_anchor_sets_cache[other_snarl] = built
+            snarl_all_reads_cache[other_snarl] = set().union(*built)
+
+        cached_primary_anchor_sets = snarl_anchor_sets_cache[primary_snarl]
+        cached_other_anchor_sets = snarl_anchor_sets_cache[other_snarl]
 
         # Find common reads between primary and other snarls
-        common_reads = {
-            read[settings.READ_ID]
-            for anchor in self.snarl_to_anchors_dictionary[primary_snarl]
-            for read in anchor.bp_matched_reads
-            if read[settings.READ_ID] in other_snarl_reads
-        }
+        common_reads = snarl_all_reads_cache[primary_snarl] & snarl_all_reads_cache[other_snarl]
         num_common_reads = len(common_reads)
         # print(f".. {len(common_reads)} Common reads: {common_reads}")
 
         # Filter both snarls' anchors to include only common reads
-        primary_sets = [
-            {read[settings.READ_ID] for read in anchor.bp_matched_reads if read[settings.READ_ID] in common_reads}
-            for anchor in self.snarl_to_anchors_dictionary[primary_snarl]
-        ]
-        other_sets = [
-            {read[settings.READ_ID] for read in anchor.bp_matched_reads if read[settings.READ_ID] in common_reads}
-            for anchor in self.snarl_to_anchors_dictionary[other_snarl]
-        ]
+        primary_sets = [s & common_reads for s in cached_primary_anchor_sets]
+        other_sets = [s & common_reads for s in cached_other_anchor_sets]
 
         # Remove empty sets (anchors with no common reads)
         primary_sets = [s for s in primary_sets if s]
@@ -2561,6 +2571,15 @@ class AlignAnchor:
         local_snarl_pos_in_read_dict = {}
         # local_valid_anchors_from_reliable_snarls = []
 
+        # Per-snarl anchor read-ID sets, built once and reused across every call this
+        # worker makes involving that snarl — the same snarl's anchors otherwise get
+        # rebuilt from anchor.bp_matched_reads redundantly: once per linked-snarl scan it
+        # appears in (~100x on average) and again on every _are_snarls_compatible call.
+        # snarl_anchor_sets_cache[sid] = [{read_id, ...} per anchor]  (unfiltered, raw)
+        # snarl_all_reads_cache[sid]   = union of all of sid's anchor sets
+        snarl_anchor_sets_cache = {}
+        snarl_all_reads_cache = {}
+
         reads_in_chunk = set()
         for snarl_id in snarl_list:
             for anchor in self.snarl_to_anchors_dictionary[snarl_id]:
@@ -2596,7 +2615,7 @@ class AlignAnchor:
                     }
             else:
                 kwargs = {}
-            linked_snarls_with_counts = self._find_linked_snarls_for_current_snarl(snarl_id, snarl_list, local_snarl_pos_in_read_dict, **kwargs)
+            linked_snarls_with_counts = self._find_linked_snarls_for_current_snarl(snarl_id, snarl_list, local_snarl_pos_in_read_dict, snarl_anchor_sets_cache=snarl_anchor_sets_cache, snarl_all_reads_cache=snarl_all_reads_cache, **kwargs)
             
             if settings.OUTPUT_LOGGING_FILES:
                 local_snarl_common_reads_dict[snarl_id] = linked_snarls_with_counts
@@ -2657,7 +2676,7 @@ class AlignAnchor:
                         }
                     else:
                         kwargs = {}
-                    is_compatible, desc, num_common_reads, primary_partition_k, other_partition_k = self._are_snarls_compatible(primary_snarl = snarl_id, other_snarl = linked_snarl_id, **kwargs)
+                    is_compatible, desc, num_common_reads, primary_partition_k, other_partition_k = self._are_snarls_compatible(primary_snarl = snarl_id, other_snarl = linked_snarl_id, snarl_anchor_sets_cache=snarl_anchor_sets_cache, snarl_all_reads_cache=snarl_all_reads_cache, **kwargs)
                     if is_compatible:
                         local_linked_snarls_compatibility_dict[snarl_id][linked_snarl_id] = True
                         local_linked_snarls_compatibility_dict[linked_snarl_id][snarl_id] = True
