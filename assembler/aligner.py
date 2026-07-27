@@ -2179,32 +2179,34 @@ class AlignAnchor:
         MAX_NEIGHBOURING_SNARLS_TO_PEEK_IN_READ = settings.MAX_NEIGHBOURING_SNARLS_TO_PEEK_IN_READ
         MAX_PRIORITY_SCORE = 1000000
         potentially_linked_snarls = {}
+        # Hoisted out of the loop: .get as a bound method (avoids repeated attribute lookup
+        # + dict.get dispatch per iteration) and self.read_to_snarl_dictionary as a local
+        # alias (LOAD_FAST is faster than LOAD_FAST+LOAD_ATTR in CPython).
+        _pls_get = potentially_linked_snarls.get
+        _r2s = self.read_to_snarl_dictionary
         for anchor in self.snarl_to_anchors_dictionary[current_snarl_id]:
             for read in anchor.bp_matched_reads:
                 read_id = read[settings.READ_ID]
-                idx_of_current_snarl_in_read = local_snarl_pos_in_read_dict[read_id][current_snarl_id]
-                left_iterator = idx_of_current_snarl_in_read - 1
-                cnt_snarls_looked_leftwards = 0
-                while (
-                    left_iterator >= 0
-                    and cnt_snarls_looked_leftwards < MAX_NEIGHBOURING_SNARLS_TO_PEEK_IN_READ):
-                    linked_snarl_id = self.read_to_snarl_dictionary[read_id][left_iterator]
-                    left_iterator -= 1
-                    potentially_linked_snarls[linked_snarl_id] = min(cnt_snarls_looked_leftwards, potentially_linked_snarls.get(linked_snarl_id, MAX_PRIORITY_SCORE)) + 1
-                    cnt_snarls_looked_leftwards += 1
-                right_iterator = idx_of_current_snarl_in_read + 1
-                cnt_snarls_looked_rightwards = 0
-                while (
-                    right_iterator < len(self.read_to_snarl_dictionary[read_id])
-                    and cnt_snarls_looked_rightwards < MAX_NEIGHBOURING_SNARLS_TO_PEEK_IN_READ):
-                    linked_snarl_id = self.read_to_snarl_dictionary[read_id][right_iterator]
-                    right_iterator += 1
-                    potentially_linked_snarls[linked_snarl_id] = min(cnt_snarls_looked_rightwards, potentially_linked_snarls.get(linked_snarl_id, 1000000)) + 1
-                    cnt_snarls_looked_rightwards += 1
+                read_snarls = _r2s[read_id]
+                idx = local_snarl_pos_in_read_dict[read_id][current_snarl_id]
+
+                # Left walk: same (linked_snarl_id, distance) sequence as the old
+                # decrementing while loop — reversed() over the slice visits read_snarls
+                # nearest-to-farthest, exactly like left_iterator counting down from idx-1.
+                left_start = idx - MAX_NEIGHBOURING_SNARLS_TO_PEEK_IN_READ
+                if left_start < 0:
+                    left_start = 0
+                for d, linked_snarl_id in enumerate(reversed(read_snarls[left_start:idx])):
+                    potentially_linked_snarls[linked_snarl_id] = min(d, _pls_get(linked_snarl_id, MAX_PRIORITY_SCORE)) + 1
+
+                # Right walk: slicing past the end of read_snarls truncates automatically,
+                # same effect as the old bounds check on right_iterator.
+                for d, linked_snarl_id in enumerate(read_snarls[idx + 1: idx + 1 + MAX_NEIGHBOURING_SNARLS_TO_PEEK_IN_READ]):
+                    potentially_linked_snarls[linked_snarl_id] = min(d, _pls_get(linked_snarl_id, MAX_PRIORITY_SCORE)) + 1
 
         potentially_linked_snarls_list = sorted(
             potentially_linked_snarls.keys(),
-            key=lambda k: potentially_linked_snarls[k]
+            key=potentially_linked_snarls.__getitem__
         )[:settings.MAX_POTENTIALLY_LINKED_SNARLS_TO_KEEP]
 
         return potentially_linked_snarls_list
@@ -2260,6 +2262,9 @@ class AlignAnchor:
         if settings.DEBUG:
             print(f"For reliability, checking linkage of {current_snarl_id} with {len(potentially_linked_snarls_list)} snarls", flush=True, file=stderr)
 
+        # Loop-invariant: doesn't change across the potentially_linked_snarls_list loop below.
+        _threshold = settings.MIN_SNARL_LINKAGE_THRESHOLD
+
         for other_snarl_id in potentially_linked_snarls_list:
             if other_snarl_id == current_snarl_id:
                 continue  # skip self-comparison
@@ -2277,16 +2282,19 @@ class AlignAnchor:
             shared_reads = all_current_reads & all_other_reads
             total_common_reads = len(shared_reads)
 
-            if total_common_reads < settings.MIN_SNARL_LINKAGE_THRESHOLD:
+            if total_common_reads < _threshold:
                 continue
 
-            # Check that shared reads are partitioned into at least two alleles in the current snarl
-            current_snarl_partitions = sum(1 for anchor_read_set in current_snarl_anchor_sets if anchor_read_set & shared_reads)
+            # Check that shared reads are partitioned into at least two alleles in the
+            # current snarl. isdisjoint() short-circuits on the first shared element and
+            # allocates nothing, unlike `anchor_read_set & shared_reads` which always builds
+            # the full intersection set just to test truthiness.
+            current_snarl_partitions = sum(1 for anchor_read_set in current_snarl_anchor_sets if not anchor_read_set.isdisjoint(shared_reads))
             if current_snarl_partitions < 2:
                 continue
 
             # Check that shared reads are partitioned into at least two alleles in the other snarl
-            other_snarl_partitions = sum(1 for anchor_read_set in other_snarl_anchor_sets if anchor_read_set & shared_reads)
+            other_snarl_partitions = sum(1 for anchor_read_set in other_snarl_anchor_sets if not anchor_read_set.isdisjoint(shared_reads))
             if other_snarl_partitions < 2:
                 continue
 
