@@ -2058,6 +2058,13 @@ class AlignAnchor:
         graph_backup = self.graph
         self.graph = None
 
+        # Remove the full FASTA dict before forking too: snarl workers never touch
+        # read_sequences, but holding it across fork() means Python's reference counting
+        # touches those pages in each worker (CoW page faults), duplicating them despite
+        # never being read.
+        read_sequences_backup = self.read_sequences
+        self.read_sequences = None
+
         # Set global variable before forking to leverage copy-on-write (avoids pickling)
         global shared_align_anchor
         shared_align_anchor = self
@@ -2076,8 +2083,9 @@ class AlignAnchor:
         with multiprocessing.Pool(processes=self.threads, initializer=init_worker_snarl) as pool:
             results = pool.map(process_each_snarl_chunk_in_worker, list_of_chunked_snarl_ids)
         
-        # Restore the graph after multiprocessing completes
+        # Restore the graph and read_sequences after multiprocessing completes
         self.graph = graph_backup
+        self.read_sequences = read_sequences_backup
         
         if settings.DEBUG:
             print("Merging results from worker processes...", flush=True, file=stderr)
