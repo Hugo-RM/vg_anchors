@@ -26,9 +26,10 @@ except RuntimeError:
     # Already set, which is fine
     pass
 
-# Global object to hold shared data for worker processes
-# Note: Set this before creating the multiprocessing pool to leverage fork()'s copy-on-write
+# Global objects to hold shared data for worker processes
+# Note: Set these before creating the multiprocessing pool to leverage fork()'s copy-on-write
 shared_align_anchor = None
+shared_gaf_chunks = None
 
 def nested_dd_factory():
     # Deliberately undecorated: this is used as a defaultdict factory, and a decorated
@@ -46,7 +47,7 @@ def init_worker():
     pass
 
 
-def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
+def process_gaf_chunk(chunk_idx: int) -> dict:
     """
     Picklable top-level dispatcher for a chunk of GAF lines.
     Kept undecorated so multiprocessing.Pool can pickle it under every profiling mode —
@@ -60,7 +61,14 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
     report per worker instead of relying on the module-level @profile / global profiler.
     Under every other mode, _process_gaf_chunk_impl already carries the real @profile
     decorator (bound at import time) and this just calls it directly.
+
+    Takes an integer index into shared_gaf_chunks (set as a module global before the Pool
+    is created, so workers inherit the actual chunk data via fork copy-on-write) rather than
+    the chunk's lines directly — pool.map otherwise pickles whatever it's given through the
+    IPC pipe to send to each worker, and the chunk lines are the largest single payload in
+    this pipeline (previously ~575MB of pickling across all workers combined).
     """
+    gaf_chunk_lines = shared_gaf_chunks[chunk_idx]
     if os.environ.get("MEMORY_PROFILE"):
         import memory_profiler
         prof = memory_profiler.LineProfiler(backend=memory_profiler.choose_backend('psutil'))
@@ -213,18 +221,20 @@ class Orchestrator:
         if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
             print(f"Processing GAF file in parallel with {self.threads} threads...", file=stderr)
         
-        # Set global variable before forking to leverage copy-on-write (avoids pickling)
-        global shared_align_anchor
+        # Set globals before forking to leverage copy-on-write (avoids pickling)
+        global shared_align_anchor, shared_gaf_chunks
         shared_align_anchor = self.align_anchor
-        
+
         os.environ["LINE_PROFILE"] = "1"
         # Divide the GAF file into chunks
-        gaf_chunks = self._chunk_gaf_file(self.gaf_path, self.threads)
+        shared_gaf_chunks = self._chunk_gaf_file(self.gaf_path, self.threads)
 
         # process_gaf_chunk is an undecorated dispatcher (see its docstring), so it pickles
-        # fine under Pool.map regardless of profiling mode, including MEMORY_PROFILE.
+        # fine under Pool.map regardless of profiling mode, including MEMORY_PROFILE. It only
+        # takes an integer chunk index now — the actual chunk lines are inherited by each
+        # worker via fork COW from shared_gaf_chunks, not pickled through the IPC pipe.
         with multiprocessing.Pool(processes=self.threads, initializer=init_worker) as pool:
-            results = pool.map(process_gaf_chunk, gaf_chunks)
+            results = pool.map(process_gaf_chunk, range(len(shared_gaf_chunks)))
         
         if settings.DEBUG:
             print("Merging results from worker processes...", file=stderr)
