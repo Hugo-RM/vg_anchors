@@ -235,6 +235,8 @@ class AlignAnchor:
             self.anchor_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
             if settings.OUTPUT_LOGGING_FILES:
                 self.path_matched_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
+            for anchor in anchors:
+                anchor.build_lookup_cache()
 
 
     @profile
@@ -271,6 +273,8 @@ class AlignAnchor:
             self.anchor_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
             if settings.OUTPUT_LOGGING_FILES:
                 self.path_matched_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
+            for anchor in anchors:
+                anchor.build_lookup_cache()
 
 
     @profile
@@ -3062,123 +3066,70 @@ def verify_path_concordance(
         Orientation of read with respect to the anchor path. True if forward, False if reverse
 
     """
+    n = len(anchor)
+
     # DETERMINING THE POSITION OF THE SENTINEL IN THE ANCHOR PATH
-    sentinel_position = next(
-                    position
-                    for position, node in enumerate(anchor)
-                    if node.id == node_id
-                )
+    # The sentinel is always the exact middle node of an anchor (anchors have odd length by
+    # construction) — same formula Anchor.get_sentinel_id() already relies on. O(1) instead
+    # of an O(n) linear scan for the node whose id matches node_id.
+    sentinel_position = (n - 1) // 2
 
     # DETERMINING THE ORIENTATION OF THE SENTINEL IN THE ANCHOR PATH
-    sentinel_orientation = (
-                    True if anchor[sentinel_position].orientation else False
-                )
+    sentinel_orientation = anchor._orientations[sentinel_position]
 
     # DETERMINING IF THE ANCHOR PATH AND THE ALIGNMENT ARE CONCORDANT OR REVERSED
     concordance_orientation = (
                     sentinel_orientation == alignment_orientation_list[alignment_position]
                 )
-    
+
     # DETERMINING WHERE IN THE ANCHOR NODES LIST THE SENTINEL IS PLACED. THIS IS USED TO KEEP TRACK OF THE WALKED BASEPARIS
     # The "cut" value tells the function how far from the start of the anchor the sentinel is located.
     sentinel_cut = (
-        (len(anchor) - 1 - sentinel_position)
+        (n - 1 - sentinel_position)
         if not concordance_orientation
         else sentinel_position
     )
 
     # POSITION OF THE ALIGNMENT AT THE BEGINNING OF THE ANCHOR. IF < 0 OR GREATER THAN ALIGNMENT NODES, EXIT.
     alignment_pos = alignment_position - sentinel_cut
-    if alignment_pos < 0 or alignment_pos >= len(alignment_node_id_list):
+    end_pos = alignment_pos + n
+    if alignment_pos < 0 or alignment_pos >= len(alignment_node_id_list) or end_pos > len(alignment_node_id_list):
         return (False, 0, 0, -1, 0, 0)
-    
-    # INITIALZING A LIST WITH ANCHOR LENGTH TO ZERO. TO KEEP TRACK OF THE BASEPAIRS CONSUMED
-    basepairs_consumed_list = [0] * len(anchor)
 
-    # # INITIALIZING A LIST OF SENTINEL NODE LENGTHS TO 0.
-    # sentinel_list = anchor.get_sentinels()
-    # sentinel_bp_consumed_list = [0] * len(sentinel_list)
+    # TO SIMPLIFY OPERATIONS, IF THE ANCHOR IS REVERSED COMPARED TO THE PATH, USE THE
+    # PRECOMPUTED REVERSED ATTRIBUTE LISTS SO SCANNING IS EASIER — no anchor copy needed.
+    if concordance_orientation:
+        node_ids_expected = anchor._node_ids
+        orientations_expected = anchor._orientations
+        lengths = anchor._lengths
+        lengths_prefix = anchor._lengths_prefix
+    else:
+        node_ids_expected = anchor._node_ids_rev
+        # Precomputed negation makes this a direct == comparison: the discordant case
+        # requires alignment_orientation[i] != anchor_orientation[i] for every i, i.e.
+        # alignment_orientation[i] == (not anchor_orientation[i]).
+        orientations_expected = anchor._orientations_rev_negated
+        lengths = anchor._lengths_rev
+        lengths_prefix = anchor._lengths_rev_prefix
 
-    # TO SIMPLIFY OPERATIONS, IF THE ANCHOR IS REVERSED COMPARED TO THE PATH, REVERT THE ANCHOR SO SCANNING IS EASIER
-    anchor_concordant = anchor[::-1] if not concordance_orientation else anchor[:]
-    
-    # POSITION IN SCANNING THE ANCHOR
-    anchor_pos = 0
-    sentinel_pos = 0
-
-    # BASEPAIR RANGE IN THE ALIGNMENT BETWEEN START AND END OF THE ANCHOR
-    # alignment_range = (alignment_pos, alignment_pos + len(anchor))
-
-    # nodes_alignment_range = alignment_node_id_list[alignment_range[0]: alignment_range[1]]
-    # orientation_alignment_range = alignment_orientation_list[alignment_range[0]: alignment_range[1]]
-
-    # al_string=""
-    # for node,orientation_bool in zip(nodes_alignment_range, orientation_alignment_range):
-    #     orientation = ">" if orientation_bool else "<"
-    #     al_string += orientation + str(node)
-
-    # SCANNING THE ANCHOR AND ALIGNMENT LIST AT THE SAME TIME. EXIT IF ANY ERROR
-    anchor_node_orientations_in_read = []
-
-    while anchor_pos < len(anchor_concordant) and alignment_pos < len(
-        alignment_node_id_list
+    # SCANNING THE ANCHOR AND ALIGNMENT LIST AT THE SAME TIME, IN ONE SHOT.
+    # Equivalent to the original per-node while loop (which returned False on the first
+    # mismatched node id or orientation) — a full-range mismatch anywhere still yields
+    # inequality, so the boolean outcome is identical; only the comparison mechanism (one
+    # C-level list == instead of a Python loop) is different.
+    if (
+        alignment_node_id_list[alignment_pos:end_pos] != node_ids_expected
+        or alignment_orientation_list[alignment_pos:end_pos] != orientations_expected
     ):
-        # check node_id and concordance is the same
-        if (
-            alignment_node_id_list[alignment_pos]
-            != anchor_concordant[anchor_pos].id
-        ) or (
-            concordance_orientation
-            != (
-                alignment_orientation_list[alignment_pos]
-                == anchor_concordant[anchor_pos].orientation
-            )
-        ):
-            return (False, 0, 0, -1, 0, 0)
-
-        # Store read orientations w.r.t anchor nodes in path
-        anchor_node_orientations_in_read.append(alignment_orientation_list[alignment_pos])
-        
-        #ADDING THE BASEPAIR LENGTHS
-        basepairs_consumed_list[anchor_pos] = anchor_concordant[anchor_pos].length
-
-        # #ADDING SENTINEL NODE LENGTHS if anchor_pos points to one of the sentinel nodes 
-        # if anchor_concordant[anchor_pos] in sentinel_list:
-        #     sentinel_bp_consumed_list[sentinel_pos] = anchor_concordant[anchor_pos].length
-        #     sentinel_pos += 1
-
-        # INCREASING POSITION COUNTER
-        anchor_pos += 1
-        alignment_pos += 1
-
-    if anchor_pos < len(anchor_concordant):
-        # didn't finish walking the entire anchor, probably because of alignment_pos < len(alignment_node_id_list)
-        return (
-            False,
-            0,
-            0,
-            -1,
-            0,
-            0
-        )
-    
-    # if read_id in ["d59863b0-5ba6-4c3e-ae32-72413357571e", "6e43d5c4-f768-464d-bb18-4220e9d90f5a"] and node_id in [158329263, 158329269]:
-    #     print(f"DEBUG: read_id = {read_id}, node_id = {node_id}, walked_length = {walked_length}", flush=True, file=stderr)
-
-    # if read_id in ["3e438e84-b266-4e8e-8649-2b10a30eac7c"] and node_id in [158329254,158329255,158329257]:
-    #     print(f"DEBUG: read_id = {read_id}, node_id = {node_id}, walked_length = {walked_length}", flush=True, file=stderr)
-
-    # if read_id in ["4ba88b40-e6f6-449c-9344-ab3e6caf174d"] and node_id in [158265798,158265800]:
-    #     print(f"DEBUG: read_id = {read_id}, node_id = {node_id}, walked_length = {walked_length}", flush=True, file=stderr)
+        return (False, 0, 0, -1, 0, 0)
 
     # COMPUTING START AND END OF WALK FOR BASEPAIR SEQUENCE AGREEMENT
-    start_walk = walked_length - sum(basepairs_consumed_list[0:sentinel_cut]) + basepairs_consumed_list[0] - (0 if (basepairs_consumed_list[0] == 1) else 1)
-    end_walk = walked_length + sum(basepairs_consumed_list[sentinel_cut:]) - basepairs_consumed_list[-1] + (0 if (basepairs_consumed_list[-1] == 1) else 1)
+    bp_before_sentinel_cut = lengths_prefix[sentinel_cut]
+    bp_total = lengths_prefix[-1]
+    start_walk = walked_length - bp_before_sentinel_cut + lengths[0] - (0 if (lengths[0] == 1) else 1)
+    end_walk = walked_length + (bp_total - bp_before_sentinel_cut) - lengths[-1] + (0 if (lengths[-1] == 1) else 1)
     start_walk_for_cs_matching = start_walk - 1
     end_walk_for_cs_matching = end_walk + 1
-
-    # if read_id in ["4ba88b40-e6f6-449c-9344-ab3e6caf174d"] and node_id in [158265798,158265800]:
-    #     print(f"DEBUG: read_id = {read_id}, node_id = {node_id}, start_walk = {start_walk}, end_walk = {end_walk}", flush=True, file=stderr)
 
     # COMPUTING READ RELATIVE STRAND
     # Simply use concordance_orientation without caching to avoid modifying shared anchor objects

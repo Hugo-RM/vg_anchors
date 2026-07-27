@@ -1,4 +1,5 @@
 from sys import stderr
+from itertools import accumulate
 
 import os
 if not os.environ.get("MEMORY_PROFILE"):
@@ -36,6 +37,26 @@ class Anchor:
     @profile
     def add_reference_path(self, path):
         self.reference_paths_covered.append(path)
+
+    @profile
+    def build_lookup_cache(self) -> None:
+        """
+        Precompute per-node attribute lists used by verify_path_concordance's hot path, so
+        that function can do a single C-level list comparison instead of a per-node Python
+        loop. Call once per anchor after it's fully built (e.g. at load time in
+        AlignAnchor.build()) — these lists go stale if _nodes is mutated afterward.
+        """
+        self._node_ids = [n.id for n in self._nodes]
+        self._node_ids_rev = self._node_ids[::-1]
+        self._orientations = [n.orientation for n in self._nodes]
+        _orientations_rev = self._orientations[::-1]
+        # Precomputed negation so the discordant-orientation check is a direct list == too;
+        # see verify_path_concordance for the derivation of why this is the right comparand.
+        self._orientations_rev_negated = [not o for o in _orientations_rev]
+        self._lengths = [n.length for n in self._nodes]
+        self._lengths_rev = self._lengths[::-1]
+        self._lengths_prefix = list(accumulate(self._lengths, initial=0))
+        self._lengths_rev_prefix = list(accumulate(self._lengths_rev, initial=0))
 
     @profile
     def __len__(self):
