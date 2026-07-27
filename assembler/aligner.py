@@ -73,8 +73,35 @@ def init_worker_snarl():
     pass
 
 
-@profile
 def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
+    """
+    Picklable top-level dispatcher for a chunk of snarl IDs.
+    Kept undecorated so multiprocessing.Pool can pickle it under every profiling mode —
+    see process_gaf_chunk in handler.py for why, including why MEMORY_PROFILE builds its
+    own worker-local LineProfiler here instead of relying on the module-level @profile.
+    """
+    if os.environ.get("MEMORY_PROFILE"):
+        import memory_profiler
+        prof = memory_profiler.LineProfiler(backend=memory_profiler.choose_backend('psutil'))
+        # AlignAnchor isn't defined yet at module-load time (this function sits above the
+        # class in the file), so the target list is built here, lazily, at call time —
+        # by then the whole module has finished importing.
+        targets = [
+            (AlignAnchor, "find_reliable_snarls"),
+            (AlignAnchor, "_are_snarls_compatible"),
+            (AlignAnchor, "_are_sets_equal_with_error_tolerance"),
+            (AlignAnchor, "_find_potentially_linked_snarls"),
+            (AlignAnchor, "_find_linked_snarls_for_current_snarl"),
+        ]
+        with helpers.traced_functions(prof, targets):
+            result = prof(_process_each_snarl_chunk_in_worker_impl)(chunk_snarl_list)
+        with open(f"worker_snarl_mem_{os.getpid()}.txt", "w") as report_f:
+            memory_profiler.show_results(prof, stream=report_f)
+        return result
+    return _process_each_snarl_chunk_in_worker_impl(chunk_snarl_list)
+
+
+def _process_each_snarl_chunk_in_worker_impl(chunk_snarl_list: list):
     """
     Worker function to run reliable snarl finding on each snarl chunk
     """
@@ -108,6 +135,10 @@ def process_each_snarl_chunk_in_worker(chunk_snarl_list: list):
     if hasattr(profile, '_profile') and profile._profile is not None:
         profile._profile.dump_stats(f"worker_snarl_{os.getpid()}.lprof")
     return result
+
+
+if not os.environ.get("MEMORY_PROFILE"):
+    _process_each_snarl_chunk_in_worker_impl = profile(_process_each_snarl_chunk_in_worker_impl)
 
 
 class AlignAnchor:
@@ -2040,11 +2071,10 @@ class AlignAnchor:
         os.environ["LINE_PROFILE"] = "1"
         # Divide the snarl IDs list into chunks
         list_of_chunked_snarl_ids = self._prepare_snarl_id_chunks_for_parallel_processing()
-        if os.environ.get("MEMORY_PROFILE"):
-            results = [process_each_snarl_chunk_in_worker(chunk) for chunk in list_of_chunked_snarl_ids]
-        else:
-            with multiprocessing.Pool(processes=self.threads, initializer=init_worker_snarl) as pool:
-                results = pool.map(process_each_snarl_chunk_in_worker, list_of_chunked_snarl_ids)
+        # process_each_snarl_chunk_in_worker is an undecorated dispatcher (see its docstring),
+        # so it pickles fine under Pool.map regardless of profiling mode, including MEMORY_PROFILE.
+        with multiprocessing.Pool(processes=self.threads, initializer=init_worker_snarl) as pool:
+            results = pool.map(process_each_snarl_chunk_in_worker, list_of_chunked_snarl_ids)
         
         # Restore the graph after multiprocessing completes
         self.graph = graph_backup
@@ -2120,7 +2150,6 @@ class AlignAnchor:
 
         return
 
-    @profile
     def _find_potentially_linked_snarls(self, current_snarl_id: str, local_snarl_pos_in_read_dict: dict=None) -> set:
         """
         Find snarls potentially linked to the current snarl.
@@ -2159,7 +2188,6 @@ class AlignAnchor:
         return potentially_linked_snarls_list
 
 
-    @profile
     def _find_linked_snarls_for_current_snarl(self, current_snarl_id: str, snarl_list: list, local_snarl_pos_in_read_dict: dict=None, local_snarl_coverage_dict: dict=None, local_snarl_allelic_coverage_dict: dict=None) -> dict:
         """
         Find snarls linked to the current snarl and count the common reads. 
@@ -2350,7 +2378,6 @@ class AlignAnchor:
             return (False, f"False_hypothesesNotWellSeparated {round(gtest.hypotheses[1].G - gtest.hypotheses[0].G, 2)} < {settings.DETANGLE_MIN_LOG_P_DELTA}", num_common_reads)
         return (True, "True", num_common_reads)
 
-    @profile
     def _are_sets_equal_with_error_tolerance(self, primary_sets, other_sets, num_common_reads, error_tolerance=0.1):
         """
         Check if two sets are equal with error tolerance.
@@ -2392,7 +2419,6 @@ class AlignAnchor:
                     return (False, "False_lowCov", num_common_reads)
         return (True, "True", num_common_reads)
 
-    @profile
     def _are_snarls_compatible(self, primary_snarl: str, other_snarl: str, snarl_read_partitions_dict: dict=None) -> tuple[bool, str, int | None, int | None]:
         """
         Check if two snarls are compatible:
@@ -2484,7 +2510,6 @@ class AlignAnchor:
             return (False, desc, num_common_reads, primary_partition_k, other_partition_k)
 
 
-    @profile
     def find_reliable_snarls(self, valid_anchors: list, snarl_list: list) -> dict:
         """
         Finds reliable snarls by checking if the current snarl is compatible with 
@@ -2954,6 +2979,17 @@ class AlignAnchor:
         return results, read_id      # After finding all anchors for a read, return the results
 
 
+if not os.environ.get("MEMORY_PROFILE"):
+    # See parser.py's matching block for why these five are conditional rather than a
+    # static @profile at each definition above. Batched here since the class has to be
+    # fully defined before its methods can be reached this way.
+    AlignAnchor.find_reliable_snarls = profile(AlignAnchor.find_reliable_snarls)
+    AlignAnchor._are_snarls_compatible = profile(AlignAnchor._are_snarls_compatible)
+    AlignAnchor._are_sets_equal_with_error_tolerance = profile(AlignAnchor._are_sets_equal_with_error_tolerance)
+    AlignAnchor._find_potentially_linked_snarls = profile(AlignAnchor._find_potentially_linked_snarls)
+    AlignAnchor._find_linked_snarls_for_current_snarl = profile(AlignAnchor._find_linked_snarls_for_current_snarl)
+
+
 @profile
 def dump_to_jsonl(object, out_file_path: str):
     """
@@ -2968,7 +3004,6 @@ def dump_to_jsonl(object, out_file_path: str):
         json.dump(object, f, ensure_ascii=False, indent=4)
 
 
-@profile
 def verify_path_concordance(
     # self,
     alignment_position: int,
@@ -3137,7 +3172,12 @@ def verify_path_concordance(
     return (True, start_walk, end_walk, relative_strand, start_walk_for_cs_matching, end_walk_for_cs_matching)
 
 
-@profile
+if not os.environ.get("MEMORY_PROFILE"):
+    # See parser.py's matching block for why this is conditional rather than a static
+    # @profile on verify_path_concordance above.
+    verify_path_concordance = profile(verify_path_concordance)
+
+
 def verify_sequence_agreement(
     # self,
     anchor: Anchor,
@@ -3257,3 +3297,9 @@ def verify_sequence_agreement(
             return (False, 0, 0, 0, 0, 0)
 
     return (False, 0, 0, 0, 0, 0)
+
+
+if not os.environ.get("MEMORY_PROFILE"):
+    # See parser.py's matching block for why this is conditional rather than a static
+    # @profile on verify_sequence_agreement above.
+    verify_sequence_agreement = profile(verify_sequence_agreement)

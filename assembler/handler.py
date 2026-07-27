@@ -1,7 +1,9 @@
 from assembler.gaf_reader import GafReader
 #from assembler.builder import AnchorDictionary
 from assembler.aligner import AlignAnchor
+import assembler.aligner as aligner_module
 import assembler.parser as parser
+from assembler.helpers import traced_functions
 import time
 import multiprocessing
 from sys import stderr
@@ -28,8 +30,10 @@ except RuntimeError:
 # Note: Set this before creating the multiprocessing pool to leverage fork()'s copy-on-write
 shared_align_anchor = None
 
-@profile
 def nested_dd_factory():
+    # Deliberately undecorated: this is used as a defaultdict factory, and a decorated
+    # (closure-wrapped) factory gets embedded in the dict that process_gaf_chunk returns —
+    # multiprocessing.Pool then fails to pickle that dict on the way back to the parent.
     return defaultdict(list)
 
 @profile
@@ -42,8 +46,42 @@ def init_worker():
     pass
 
 
-@profile
 def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
+    """
+    Picklable top-level dispatcher for a chunk of GAF lines.
+    Kept undecorated so multiprocessing.Pool can pickle it under every profiling mode —
+    memory_profiler wraps @profile-decorated functions in a closure that pickle can't
+    serialize by reference, which used to force MEMORY_PROFILE runs to skip Pool entirely.
+
+    Under MEMORY_PROFILE, `python -m memory_profiler` reports results exactly once, in a
+    finally block wrapping the whole script, in whichever process reaches it — that's the
+    parent, never a forked worker, since workers just get reaped when the Pool closes. So
+    under MEMORY_PROFILE this builds a fresh, worker-local LineProfiler and writes its own
+    report per worker instead of relying on the module-level @profile / global profiler.
+    Under every other mode, _process_gaf_chunk_impl already carries the real @profile
+    decorator (bound at import time) and this just calls it directly.
+    """
+    if os.environ.get("MEMORY_PROFILE"):
+        import memory_profiler
+        prof = memory_profiler.LineProfiler(backend=memory_profiler.choose_backend('psutil'))
+        # Nested calls a fresh LineProfiler wouldn't otherwise see: processGafLine walks
+        # each node, calling verify_path_concordance then verify_sequence_agreement per
+        # anchor hit, which itself calls parse_cs_tag's caller upstream in parser.py.
+        targets = [
+            (parser, "processGafLine"),
+            (parser, "parse_cs_tag"),
+            (aligner_module, "verify_sequence_agreement"),
+            (aligner_module, "verify_path_concordance"),
+        ]
+        with traced_functions(prof, targets):
+            result = prof(_process_gaf_chunk_impl)(gaf_chunk_lines)
+        with open(f"worker_gaf_mem_{os.getpid()}.txt", "w") as report_f:
+            memory_profiler.show_results(prof, stream=report_f)
+        return result
+    return _process_gaf_chunk_impl(gaf_chunk_lines)
+
+
+def _process_gaf_chunk_impl(gaf_chunk_lines: list[str]) -> dict:
     """
     Worker function to process a chunk of GAF lines.
     This function is executed in a separate process.
@@ -104,6 +142,14 @@ def process_gaf_chunk(gaf_chunk_lines: list[str]) -> dict:
         "path_matched_reads": local_path_matched_reads,
         "reads_processed": local_reads_processed_dict
     }
+
+
+if not os.environ.get("MEMORY_PROFILE"):
+    # line_profiler mode: decorate statically, same as every other @profile use in this file.
+    # Left undecorated under MEMORY_PROFILE — process_gaf_chunk wraps the raw function itself
+    # with a fresh, worker-local LineProfiler; wrapping an already-decorated function here
+    # would make that fresh profiler trace the wrapper's code instead of the real one.
+    _process_gaf_chunk_impl = profile(_process_gaf_chunk_impl)
 
 
 class Orchestrator:
@@ -170,13 +216,10 @@ class Orchestrator:
         # Divide the GAF file into chunks
         gaf_chunks = self._chunk_gaf_file(self.gaf_path, self.threads)
 
-        # Bypass Pool when memory profiling: pool.map pickles the worker function,
-        # which fails when memory_profiler wraps it in an unpicklable closure.
-        if os.environ.get("MEMORY_PROFILE"):
-            results = [process_gaf_chunk(chunk) for chunk in gaf_chunks]
-        else:
-            with multiprocessing.Pool(processes=self.threads, initializer=init_worker) as pool:
-                results = pool.map(process_gaf_chunk, gaf_chunks)
+        # process_gaf_chunk is an undecorated dispatcher (see its docstring), so it pickles
+        # fine under Pool.map regardless of profiling mode, including MEMORY_PROFILE.
+        with multiprocessing.Pool(processes=self.threads, initializer=init_worker) as pool:
+            results = pool.map(process_gaf_chunk, gaf_chunks)
         
         if settings.DEBUG:
             print("Merging results from worker processes...", file=stderr)

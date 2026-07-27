@@ -97,6 +97,29 @@ def extract_sequence(fasta_file, read_id):
             return str(record.seq)
     return None  # Return None if read_id is not found
 
+
+@contextmanager
+def traced_functions(prof, targets):
+    """
+    Temporarily wrap each (owner, attr_name) target with `prof` (a memory_profiler
+    LineProfiler) so they all report into the same profile, then restore the originals.
+    owner is a module or a class; attr_name is looked up on it with getattr/setattr, which
+    works for plain module-level functions and for class methods (accessed unbound via the
+    class, Python's descriptor protocol re-binds them to `self` normally when called).
+
+    Used by the GAF/snarl worker dispatchers under MEMORY_PROFILE: a fresh LineProfiler
+    only tracks the exact function object it's given, not anything that function calls, so
+    without this, only the dispatcher's own top-level function shows up per worker.
+    """
+    originals = [(owner, name, getattr(owner, name)) for owner, name in targets]
+    try:
+        for owner, name, original in originals:
+            setattr(owner, name, prof(original))
+        yield
+    finally:
+        for owner, name, original in originals:
+            setattr(owner, name, original)
+
 if __name__ == "__main__":
     # verify_anchors_validity(argv[1], argv[2], argv[3])
     #anchors_shasta = argv[1]

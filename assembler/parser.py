@@ -27,7 +27,6 @@ For cs tag description see : https://lh3.github.io/minimap2/minimap2.html#10
 """
 
 
-@profile
 def processGafLine(gaf_line: str):
     """
     It parses a GAF line to extract and structure useful tags and returns them in a list
@@ -123,7 +122,6 @@ def processGafLine(gaf_line: str):
     return None
 
 
-@profile
 def parse_cs_tag(cs_string: str):
     """
     Parses the cs tag string into a list of alignment steps and cumulative position offsets.
@@ -175,3 +173,13 @@ def parse_cs_tag(cs_string: str):
             val = len(op) - 1
             app_op(('=', val)); app_p(val); app_s(val)
     return ops, list(accumulate(path_d, initial=0)), list(accumulate(seq_d, initial=0))
+
+
+if not os.environ.get("MEMORY_PROFILE"):
+    # Left undecorated above and applied conditionally here: under MEMORY_PROFILE, worker
+    # dispatchers (handler.py, aligner.py) wrap these with their own fresh, per-worker
+    # LineProfiler via helpers.traced_functions(). A static @profile here would resolve to
+    # the CLI's single global profiler instead, and the dispatcher would end up wrapping
+    # that wrapper — tracking memory_profiler's own internals instead of this file's code.
+    processGafLine = profile(processGafLine)
+    parse_cs_tag = profile(parse_cs_tag)
