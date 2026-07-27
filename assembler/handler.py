@@ -96,6 +96,11 @@ def _process_gaf_chunk_impl(gaf_chunk_lines: list[str]) -> dict:
     local_path_matched_reads = defaultdict(list)
     local_reads_processed_dict = {} # {read_name: processed_line_data}
 
+    # Worker-local cache of (node_handle, length) per node ID. Reads within a chunk share
+    # most of their path, so the vast majority of node visits are repeats — this trades
+    # 3 C-extension calls (has_node/get_handle/get_length) for 1 dict lookup on a hit.
+    node_cache = {}
+
     t0 = time.time()
     # Process each line in the assigned GAF chunk.
     for line in gaf_chunk_lines:
@@ -118,7 +123,7 @@ def _process_gaf_chunk_impl(gaf_chunk_lines: list[str]) -> dict:
         
             # Call the refactored processGafLine on the shared object
             # This is a read-only operation on shared_align_anchor
-            result, current_read = shared_align_anchor.processGafLine(processed_line_data)
+            result, current_read = shared_align_anchor.processGafLine(processed_line_data, node_cache=node_cache)
                         
             for (sentinel, i), reads in result["anchor_reads"].items():
                 local_anchor_reads_dict[sentinel][i].extend(reads)

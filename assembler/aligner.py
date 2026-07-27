@@ -2872,7 +2872,7 @@ class AlignAnchor:
 
 
     @profile
-    def processGafLine(self, alignment_l: list, debug_file: str = None):
+    def processGafLine(self, alignment_l: list, debug_file: str = None, node_cache: dict = None):
         """
         It processes an alignment list (the result of parsing an alignment line) to find anchors in the read associated with the alignment. It returns the results to be collected by the caller.
         It:
@@ -2890,21 +2890,29 @@ class AlignAnchor:
         }
 
         read_id = alignment_l[settings.READ_POSITION]
-        
+
         walked_length = 0
         if settings.DEBUG:
             print(f"Processing read {read_id}.....", flush=True, file=stderr)
 
+        if node_cache is None:
+            node_cache = {}
+
         for position, node_id in enumerate(alignment_l[settings.NODE_POSITION]):
 
-            # Verifying that the nodes coming from the alingment are in the graph I am using
-            if not self.graph.has_node(node_id):
-                if settings.DEBUG:
-                    print(f"THE NODE {node_id} PRESENT IN THE ALIGNMENT IS NOT IN THE PACKED GRAPH.")
-                exit(1)
+            cached = node_cache.get(node_id)
+            if cached is None:
+                # Verifying that the nodes coming from the alingment are in the graph I am using
+                if not self.graph.has_node(node_id):
+                    if settings.DEBUG:
+                        print(f"THE NODE {node_id} PRESENT IN THE ALIGNMENT IS NOT IN THE PACKED GRAPH.")
+                    exit(1)
 
-            node_handle = self.graph.get_handle(node_id)
-            length = self.graph.get_length(node_handle)
+                node_handle = self.graph.get_handle(node_id)
+                length = self.graph.get_length(node_handle)
+                node_cache[node_id] = (node_handle, length)
+            else:
+                node_handle, length = cached
 
             anchors = self.sentinel_to_anchor.get(node_id)
             
