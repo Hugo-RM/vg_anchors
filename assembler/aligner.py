@@ -3108,10 +3108,18 @@ def verify_path_concordance(
     n = len(anchor)
 
     # DETERMINING THE POSITION OF THE SENTINEL IN THE ANCHOR PATH
-    # The sentinel is always the exact middle node of an anchor (anchors have odd length by
-    # construction) — same formula Anchor.get_sentinel_id() already relies on. O(1) instead
-    # of an O(n) linear scan for the node whose id matches node_id.
-    sentinel_position = (n - 1) // 2
+    # O(1) instead of an O(n) linear scan for the node whose id matches node_id — but this
+    # must replicate Anchor.get_sentinel_id()'s own formula exactly, not just the simpler
+    # (n-1)//2 case. For odd-length anchors, (n-1)//2 counted from the front and the
+    # equivalent negative index counted from the back land on the same position, so
+    # orientation doesn't matter. For EVEN-length anchors they do NOT agree — e.g. a
+    # 4-node anchor <4<3<2<1 (first node reverse-oriented) has its sentinel at index 2,
+    # not index 1 — so the first-node orientation branch is required for correctness on
+    # even-length anchors, exactly as get_sentinel_id() already does.
+    if anchor._orientations[0]:
+        sentinel_position = (n - 1) // 2
+    else:
+        sentinel_position = n - ((n + 1) // 2)
 
     # DETERMINING THE ORIENTATION OF THE SENTINEL IN THE ANCHOR PATH
     sentinel_orientation = anchor._orientations[sentinel_position]
