@@ -1,6 +1,8 @@
 
 class Node:
 
+    __slots__ = ('id', 'length', 'orientation')
+
     def __init__(self,id,length,orientation) -> None:
         self.id: int = id
         self.length: int = length
