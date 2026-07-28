@@ -3204,8 +3204,8 @@ def verify_sequence_agreement(
     walk_start_for_cs_matching: int,
     walk_end_for_cs_matching: int,
     intialise_walked_in_the_sequence_to: int,
-    _cum_path: list,
-    _cum_seq: list,
+    _cum_path,   # array.array('q') — see parse_cs_tag
+    _cum_seq,    # array.array('q') — see parse_cs_tag
 ):
     """
     It uses the parsed cs tag from the gaf to verify that the anchor and the path match at the sequence level.
@@ -3222,9 +3222,9 @@ def verify_sequence_agreement(
         The alingment start in the path (from gaf)
     end_in_path: int
         The alingment end in the path (from gaf)
-    _cum_path: list
+    _cum_path: array.array('q')
         Prefix sums of path deltas from parse_cs_tag; length len(cs_walk)+1
-    _cum_seq: list
+    _cum_seq: array.array('q')
         Prefix sums of seq deltas from parse_cs_tag; length len(cs_walk)+1
     Returns
     -------

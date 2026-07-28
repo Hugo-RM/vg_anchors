@@ -1,5 +1,6 @@
 from sys import stderr
 import re
+from array import array
 from itertools import accumulate
 from assembler.config import settings
 
@@ -49,8 +50,8 @@ def processGafLine(gaf_line: str):
         nodes_list : list - of node_ids of the nodes walked by the path
         orientation_list : list - of node orientations of the nodes walked by the path
         cs_line : list - succession of tuples describing the cigar
-        cum_path : list - prefix sums of path deltas, length len(cs_line)+1, starting with 0
-        cum_seq : list - prefix sums of seq deltas, length len(cs_line)+1, starting with 0
+        cum_path : array.array('q') - prefix sums of path deltas, length len(cs_line)+1, starting with 0
+        cum_seq : array.array('q') - prefix sums of seq deltas, length len(cs_line)+1, starting with 0
     """
 
     line_elements = gaf_line.split()
@@ -137,10 +138,17 @@ def parse_cs_tag(cs_string: str):
     -------
     ops : list of (flag, val) tuples
         list of operations and bp movement
-    cum_path : list[int]
-        prefix sums of path deltas, length len(ops)+1, starting with 0
-    cum_seq : list[int]
-        prefix sums of seq deltas, length len(ops)+1, starting with 0
+    cum_path : array.array('q')
+        prefix sums of path deltas, length len(ops)+1, starting with 0.
+        array.array instead of list: these are built once and only ever
+        read via bisect/indexing afterward (never mutated), and every
+        element is a plain int, so the per-element PyLong object overhead
+        of a list buys nothing here — array.array stores them as packed
+        8-byte C longs instead, cutting memory ~4x for these hot,
+        per-read structures.
+    cum_seq : array.array('q')
+        prefix sums of seq deltas, length len(ops)+1, starting with 0. Same
+        array.array rationale as cum_path.
     """
     # flag characters used to represent the basepair alignment
     # = : identical sequence, spelled [ACGTN]+
@@ -172,7 +180,7 @@ def parse_cs_tag(cs_string: str):
         else:  # '='
             val = len(op) - 1
             app_op(('=', val)); app_p(val); app_s(val)
-    return ops, list(accumulate(path_d, initial=0)), list(accumulate(seq_d, initial=0))
+    return ops, array('q', accumulate(path_d, initial=0)), array('q', accumulate(seq_d, initial=0))
 
 
 if not os.environ.get("MEMORY_PROFILE"):
