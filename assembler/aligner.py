@@ -2064,6 +2064,13 @@ class AlignAnchor:
                         # It's not the real journey of the read. Create a rank for each anchor as it is found in the read processing step. And then later sort the snarl IDs for each read based on that rank key.
                         self.read_to_snarl_dictionary[read_id].append(anchor.snarl_id)  # stores read IDs and the snarls it passes through (read journey)
 
+        # anchor_reads_dict is never read again anywhere else in this file after the loop
+        # above -- everything downstream (extend_and_merge_snarls, snarl reliability) uses
+        # snarl_to_anchors_dictionary / read_to_snarl_dictionary / bp_matched_reads instead.
+        # It held one entry per (sentinel, anchor-index) across every read processed during
+        # the whole GAF phase, so it's a real structure, not a small one.
+        self.anchor_reads_dict = {}
+
         # ## Sort the snarl IDs based on the anchor precedence
         # def anchor_custom_comparator_wrapper(snarl_id1, snarl_id2):
         #     anchor1 = self.snarl_to_anchors_dictionary[snarl_id1][0]
