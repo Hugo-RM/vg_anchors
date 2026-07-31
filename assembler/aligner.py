@@ -1950,6 +1950,12 @@ class AlignAnchor:
                 for output in self.outputs_for_file:
                     print(output, file=f)
 
+        # self.outputs_for_file is never read anywhere else in this file after the write
+        # above -- it's an instance attribute, so unlike a local variable it would
+        # otherwise sit alive on self for the rest of the run (extend_and_merge_snarls,
+        # output dumping) with nothing left to use it for.
+        self.outputs_for_file = []
+
         if settings.OUTPUT_LOGGING_FILES:
             # Dump the dictionaries
             with open(file_paths[1], "w") as f:
