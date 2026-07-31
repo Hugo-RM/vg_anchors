@@ -2144,6 +2144,11 @@ class AlignAnchor:
         else:
             file_paths = []
         self.merge_reliability_checking_results(results, file_paths, reliable_snarls_out_file_path=reliable_snarls_out_file_path)
+        # Same pattern as the GAF-side results cleanup (memory-optimizations, 02ea81e):
+        # this would otherwise sit alive, unused, through the whole serialized
+        # extend_and_merge_snarls phase that follows -- exactly the phase we already
+        # confirmed is where the true program-wide peak occurs.
+        del results
 
         # NOTE:
         # Changelog: Earlier, valid_anchors_from_reliable_snarls was being returned from the merge_reliability_checking_results(...).
