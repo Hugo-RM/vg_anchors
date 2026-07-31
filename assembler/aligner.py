@@ -61,6 +61,30 @@ def _build_binomial_pvalue_lookup(max_n):
 _binomial_pvalue_lookup = None
 
 
+# FIFO cap on the per-snarl anchor read-set cache (snarl_anchor_sets_cache /
+# snarl_all_reads_cache in find_reliable_snarls and friends). Unbounded, this cache made
+# one snarl worker's peak memory ~3x its siblings' on the test graph (see
+# AUTOPILOT_LOG.md #4). Capped, a worker whose chunk touches more than
+# MAX_SNARL_READ_CACHE_SIZE distinct snarls pays some cache misses (rebuild instead of
+# reuse) instead of unbounded growth.
+#
+# CORRECTNESS REQUIREMENT (see AUTOPILOT_LOG.md #6 for the bug this caused once already):
+# every caller MUST resolve a key's cached value to a local variable immediately after
+# calling this, before looking up or caching any OTHER key. A second dict lookup for the
+# same key later in the same call is unsafe -- caching a different key in between can
+# evict this one, since "already present" doesn't refresh a key's FIFO position.
+MAX_SNARL_READ_CACHE_SIZE = 200
+
+
+def _cache_snarl_reads(snarl_id, anchor_read_sets, snarl_anchor_sets_cache, snarl_all_reads_cache):
+    snarl_anchor_sets_cache[snarl_id] = anchor_read_sets
+    snarl_all_reads_cache[snarl_id] = set().union(*anchor_read_sets)
+    if len(snarl_anchor_sets_cache) > MAX_SNARL_READ_CACHE_SIZE:
+        oldest = next(iter(snarl_anchor_sets_cache))  # plain dicts preserve insertion order
+        del snarl_anchor_sets_cache[oldest]
+        del snarl_all_reads_cache[oldest]
+
+
 shared_align_anchor = None
 
 
@@ -2232,8 +2256,7 @@ class AlignAnchor:
                 {read[settings.READ_ID] for read in anchor.bp_matched_reads}
                 for anchor in self.snarl_to_anchors_dictionary[current_snarl_id]
             ]
-            snarl_anchor_sets_cache[current_snarl_id] = built
-            snarl_all_reads_cache[current_snarl_id] = set().union(*built)
+            _cache_snarl_reads(current_snarl_id, built, snarl_anchor_sets_cache, snarl_all_reads_cache)
         current_snarl_anchor_sets = snarl_anchor_sets_cache[current_snarl_id]
         all_current_reads = snarl_all_reads_cache[current_snarl_id]
 
@@ -2276,8 +2299,7 @@ class AlignAnchor:
                     {read[settings.READ_ID] for read in anchor.bp_matched_reads}
                     for anchor in self.snarl_to_anchors_dictionary[other_snarl_id]
                 ]
-                snarl_anchor_sets_cache[other_snarl_id] = built
-                snarl_all_reads_cache[other_snarl_id] = set().union(*built)
+                _cache_snarl_reads(other_snarl_id, built, snarl_anchor_sets_cache, snarl_all_reads_cache)
             other_snarl_anchor_sets = snarl_anchor_sets_cache[other_snarl_id]
             all_other_reads = snarl_all_reads_cache[other_snarl_id]
 
@@ -2479,26 +2501,29 @@ class AlignAnchor:
 
         # Anchor read sets for both snarls — cached (see find_reliable_snarls) instead of
         # rebuilt from anchor.bp_matched_reads on every one of the ~71k calls this makes.
+        # Each key is resolved to a local variable immediately after ensuring it's cached,
+        # before the other key is touched at all -- see the correctness note above
+        # _cache_snarl_reads's definition for why that order matters with a capped cache.
         if primary_snarl not in snarl_anchor_sets_cache:
             built = [
                 {read[settings.READ_ID] for read in anchor.bp_matched_reads}
                 for anchor in self.snarl_to_anchors_dictionary[primary_snarl]
             ]
-            snarl_anchor_sets_cache[primary_snarl] = built
-            snarl_all_reads_cache[primary_snarl] = set().union(*built)
+            _cache_snarl_reads(primary_snarl, built, snarl_anchor_sets_cache, snarl_all_reads_cache)
+        cached_primary_anchor_sets = snarl_anchor_sets_cache[primary_snarl]
+        primary_all_reads = snarl_all_reads_cache[primary_snarl]
+
         if other_snarl not in snarl_anchor_sets_cache:
             built = [
                 {read[settings.READ_ID] for read in anchor.bp_matched_reads}
                 for anchor in self.snarl_to_anchors_dictionary[other_snarl]
             ]
-            snarl_anchor_sets_cache[other_snarl] = built
-            snarl_all_reads_cache[other_snarl] = set().union(*built)
-
-        cached_primary_anchor_sets = snarl_anchor_sets_cache[primary_snarl]
+            _cache_snarl_reads(other_snarl, built, snarl_anchor_sets_cache, snarl_all_reads_cache)
         cached_other_anchor_sets = snarl_anchor_sets_cache[other_snarl]
+        other_all_reads = snarl_all_reads_cache[other_snarl]
 
         # Find common reads between primary and other snarls
-        common_reads = snarl_all_reads_cache[primary_snarl] & snarl_all_reads_cache[other_snarl]
+        common_reads = primary_all_reads & other_all_reads
         num_common_reads = len(common_reads)
         # print(f".. {len(common_reads)} Common reads: {common_reads}")
 
