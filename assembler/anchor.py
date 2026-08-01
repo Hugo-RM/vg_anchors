@@ -14,6 +14,7 @@ class Anchor:
     @profile
     def __init__(self) -> None:
         self._nodes: list = []
+        self._node_ids = None  # lazy-build sentinel for build_lookup_cache(); see verify_path_concordance
         self.snarl_id: int = 0
         self.genomic_position: int = 0
         # self.baseparilength: int = 0
@@ -43,8 +44,15 @@ class Anchor:
         """
         Precompute per-node attribute lists used by verify_path_concordance's hot path, so
         that function can do a single C-level list comparison instead of a per-node Python
-        loop. Call once per anchor after it's fully built (e.g. at load time in
-        AlignAnchor.build()) — these lists go stale if _nodes is mutated afterward.
+        loop. Built lazily -- verify_path_concordance calls this itself on first use per
+        anchor (checking self._node_ids is None) -- rather than eagerly for the whole
+        anchor dictionary at load time: eager building scales with total anchor-dictionary
+        size regardless of how many anchors any given run's reads actually touch, which is
+        cheap on a small graph but a substantial, mostly-wasted cost on a large graph with a
+        comparatively modest read set (confirmed: dominated main-process time on a
+        981K-node graph with only 6,400 reads). These lists go stale if _nodes is mutated
+        afterward -- anything that appends/inserts a node into an already-cached anchor
+        must reset self._node_ids = None to force a rebuild.
         """
         self._node_ids = [n.id for n in self._nodes]
         self._node_ids_rev = self._node_ids[::-1]

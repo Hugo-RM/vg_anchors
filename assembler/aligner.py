@@ -257,12 +257,14 @@ class AlignAnchor:
         self.graph.deserialize(packed_graph_path)
 
         # initializing output dictionary
+        # anchor.build_lookup_cache() is NOT called here -- verify_path_concordance builds
+        # it lazily on first real use per anchor (see its docstring); building unconditionally
+        # for the whole dictionary here scales with graph size regardless of how many anchors
+        # this run's reads actually touch.
         for sentinel, anchors in self.sentinel_to_anchor.items():
             self.anchor_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
             if settings.OUTPUT_LOGGING_FILES:
                 self.path_matched_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
-            for anchor in anchors:
-                anchor.build_lookup_cache()
 
 
     @profile
@@ -295,12 +297,12 @@ class AlignAnchor:
         self.sentinel_to_anchor = dictionary
         self.graph.deserialize(packed_graph_path)
 
+        # anchor.build_lookup_cache() is NOT called here -- see the matching comment in
+        # AlignAnchor.build() above.
         for sentinel, anchors in self.sentinel_to_anchor.items():
             self.anchor_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
             if settings.OUTPUT_LOGGING_FILES:
                 self.path_matched_reads_dict[sentinel] = [[] for _ in range(len(anchors))]
-            for anchor in anchors:
-                anchor.build_lookup_cache()
 
 
     @profile
@@ -3162,6 +3164,11 @@ def verify_path_concordance(
 
     """
     n = len(anchor)
+
+    # Lazy-build the precomputed lookup lists this function needs, on first use per anchor
+    # (see Anchor.build_lookup_cache's docstring for why this is lazy, not eager-at-load).
+    if anchor._node_ids is None:
+        anchor.build_lookup_cache()
 
     # DETERMINING THE POSITION OF THE SENTINEL IN THE ANCHOR PATH
     # O(1) instead of an O(n) linear scan for the node whose id matches node_id — but this
