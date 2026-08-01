@@ -235,7 +235,12 @@ class Orchestrator:
         # worker via fork COW from shared_gaf_chunks, not pickled through the IPC pipe.
         with multiprocessing.Pool(processes=self.threads, initializer=init_worker) as pool:
             results = pool.map(process_gaf_chunk, range(len(shared_gaf_chunks)))
-        
+
+        # Workers have already forked and finished; shared_gaf_chunks was only needed to
+        # seed them via copy-on-write and would otherwise sit alive, unused, through the
+        # rest of the pipeline (snarl reliability, extend & merge, output writing).
+        shared_gaf_chunks = None
+
         if settings.DEBUG:
             print("Merging results from worker processes...", file=stderr)
         # Prepare reads_processed TSV: remove old file once before appending
@@ -244,7 +249,8 @@ class Orchestrator:
             os.remove(reads_processed_path)
         for result_dict in results:
             self.align_anchor.merge_results(result_dict, reads_processed_path)
-        
+        del results
+
         total_time_for_gaf_processing = time.time() - t0
         
         if settings.DEBUG or settings.PRINT_RUNTIME_LOGS:
