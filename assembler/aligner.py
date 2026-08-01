@@ -2990,9 +2990,22 @@ class AlignAnchor:
             if cached is None:
                 # Verifying that the nodes coming from the alingment are in the graph I am using
                 if not self.graph.has_node(node_id):
-                    if settings.DEBUG:
-                        print(f"THE NODE {node_id} PRESENT IN THE ALIGNMENT IS NOT IN THE PACKED GRAPH.")
-                    exit(1)
+                    # Raise, don't exit()/os._exit(): this runs inside a multiprocessing.Pool
+                    # worker. exit()/sys.exit() there triggers a full interpreter shutdown that
+                    # walks GC/destructors for the whole loaded graph and anchor dictionary --
+                    # many minutes at production scale instead of failing fast. os._exit(1)
+                    # avoids that shutdown but kills the worker process outside Pool's own
+                    # bookkeeping, so pool.map() in the parent never learns the task failed and
+                    # hangs forever waiting for a result that will never arrive. Raising is the
+                    # one path Pool actually handles: it's caught by Pool's own per-task wrapper
+                    # (no interpreter shutdown) and re-raised in the parent as soon as pool.map()
+                    # reaches this result.
+                    raise RuntimeError(
+                        f"node {node_id} (from the alignment path of read "
+                        f"{alignment_l[settings.READ_POSITION]!r}) is not in the graph. "
+                        "The GAF and the graph are likely mismatched (aligned against a "
+                        "different graph, or a different chunk of one)."
+                    )
 
                 node_handle = self.graph.get_handle(node_id)
                 length = self.graph.get_length(node_handle)
