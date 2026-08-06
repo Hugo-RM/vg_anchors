@@ -158,29 +158,31 @@ def parse_cs_tag(cs_string: str):
     # * : substitution (reference to query) [acgtn][acgtn]
     # example: cs:Z::6724+T:581+A:1027-G:2962
     ops = []
-    path_d = []
-    seq_d = []
-    app_op = ops.append
-    app_p = path_d.append
-    app_s = seq_d.append
+    path_deltas = []
+    seq_deltas = []
+    # Bound methods hoisted to locals: avoids repeated attribute lookup + method
+    # dispatch on ops/path_deltas/seq_deltas for every cs operation in the string.
+    append_op = ops.append
+    append_path_delta = path_deltas.append
+    append_seq_delta = seq_deltas.append
     for m in _CS_OPS.finditer(cs_string):
         op = m.group()
         flag = op[0]
         if flag == ':':
             val = int(op[1:])
-            app_op((':', val)); app_p(val); app_s(val)
+            append_op((':', val)); append_path_delta(val); append_seq_delta(val)
         elif flag == '*':
-            app_op(('*', 1)); app_p(1); app_s(1)
+            append_op(('*', 1)); append_path_delta(1); append_seq_delta(1)
         elif flag == '+':
             val = len(op) - 1
-            app_op(('+', val)); app_p(0); app_s(val)
+            append_op(('+', val)); append_path_delta(0); append_seq_delta(val)
         elif flag == '-':
             val = len(op) - 1
-            app_op(('-', val)); app_p(val); app_s(0)
+            append_op(('-', val)); append_path_delta(val); append_seq_delta(0)
         else:  # '='
             val = len(op) - 1
-            app_op(('=', val)); app_p(val); app_s(val)
-    return ops, array('q', accumulate(path_d, initial=0)), array('q', accumulate(seq_d, initial=0))
+            append_op(('=', val)); append_path_delta(val); append_seq_delta(val)
+    return ops, array('q', accumulate(path_deltas, initial=0)), array('q', accumulate(seq_deltas, initial=0))
 
 
 if not os.environ.get("MEMORY_PROFILE"):

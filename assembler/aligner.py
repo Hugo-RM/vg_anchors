@@ -77,6 +77,12 @@ MAX_SNARL_READ_CACHE_SIZE = 200
 
 
 def _cache_snarl_reads(snarl_id, anchor_read_sets, snarl_anchor_sets_cache, snarl_all_reads_cache):
+    """
+    Store a snarl's per-anchor read-ID sets (and their union) in the FIFO-capped
+    caches, evicting the oldest entry once MAX_SNARL_READ_CACHE_SIZE is exceeded.
+    See the correctness requirement in the comment above MAX_SNARL_READ_CACHE_SIZE
+    before adding another call site.
+    """
     snarl_anchor_sets_cache[snarl_id] = anchor_read_sets
     snarl_all_reads_cache[snarl_id] = set().union(*anchor_read_sets)
     if len(snarl_anchor_sets_cache) > MAX_SNARL_READ_CACHE_SIZE:
@@ -2228,12 +2234,12 @@ class AlignAnchor:
         # Hoisted out of the loop: .get as a bound method (avoids repeated attribute lookup
         # + dict.get dispatch per iteration) and self.read_to_snarl_dictionary as a local
         # alias (LOAD_FAST is faster than LOAD_FAST+LOAD_ATTR in CPython).
-        _pls_get = potentially_linked_snarls.get
-        _r2s = self.read_to_snarl_dictionary
+        potentially_linked_snarls_get = potentially_linked_snarls.get
+        read_to_snarl_dict = self.read_to_snarl_dictionary
         for anchor in self.snarl_to_anchors_dictionary[current_snarl_id]:
             for read in anchor.bp_matched_reads:
                 read_id = read[settings.READ_ID]
-                read_snarls = _r2s[read_id]
+                read_snarls = read_to_snarl_dict[read_id]
                 idx = local_snarl_pos_in_read_dict[read_id][current_snarl_id]
 
                 # Left walk: same (linked_snarl_id, distance) sequence as the old
@@ -2243,12 +2249,12 @@ class AlignAnchor:
                 if left_start < 0:
                     left_start = 0
                 for d, linked_snarl_id in enumerate(reversed(read_snarls[left_start:idx])):
-                    potentially_linked_snarls[linked_snarl_id] = min(d, _pls_get(linked_snarl_id, MAX_PRIORITY_SCORE)) + 1
+                    potentially_linked_snarls[linked_snarl_id] = min(d, potentially_linked_snarls_get(linked_snarl_id, MAX_PRIORITY_SCORE)) + 1
 
                 # Right walk: slicing past the end of read_snarls truncates automatically,
                 # same effect as the old bounds check on right_iterator.
                 for d, linked_snarl_id in enumerate(read_snarls[idx + 1: idx + 1 + MAX_NEIGHBOURING_SNARLS_TO_PEEK_IN_READ]):
-                    potentially_linked_snarls[linked_snarl_id] = min(d, _pls_get(linked_snarl_id, MAX_PRIORITY_SCORE)) + 1
+                    potentially_linked_snarls[linked_snarl_id] = min(d, potentially_linked_snarls_get(linked_snarl_id, MAX_PRIORITY_SCORE)) + 1
 
         potentially_linked_snarls_list = sorted(
             potentially_linked_snarls.keys(),
@@ -3311,14 +3317,14 @@ def verify_sequence_agreement(
 
     # Binary-search the precomputed cumulative path offsets to find the cs step that first
     # crosses anchor_bp_start, without iterating from step 0.
-    _target = anchor_bp_start - start_in_path
-    _k = bisect.bisect_right(_cum_path, _target)
-    if _k == 0 or _k > len(cs_walk):
+    target_path_offset = anchor_bp_start - start_in_path
+    insertion_index = bisect.bisect_right(_cum_path, target_path_offset)
+    if insertion_index == 0 or insertion_index > len(cs_walk):
         return (False, 0, 0, 0, 0, 0)
-    _j = _k - 1
-    step = cs_walk[_j]
-    walked_in_the_path = start_in_path + _cum_path[_j + 1]
-    walked_in_the_sequence = intialise_walked_in_the_sequence_to + _cum_seq[_j + 1]
+    cs_step_index = insertion_index - 1
+    step = cs_walk[cs_step_index]
+    walked_in_the_path = start_in_path + _cum_path[cs_step_index + 1]
+    walked_in_the_sequence = intialise_walked_in_the_sequence_to + _cum_seq[cs_step_index + 1]
 
     # The step crossing anchor_bp_start must be a pure identity (":") step
     if step[0] != ":":
@@ -3339,8 +3345,8 @@ def verify_sequence_agreement(
             diff_end
         )
 
-    # Anchor spans multiple cs steps. Continue from _j+1 in strict identity mode
-    for step in cs_walk[_j + 1:]:
+    # Anchor spans multiple cs steps. Continue from cs_step_index+1 in strict identity mode
+    for step in cs_walk[cs_step_index + 1:]:
         if step[0] == "+":
             walked_in_the_sequence += step[1]
         elif step[0] == ":":
