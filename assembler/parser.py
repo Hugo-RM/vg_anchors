@@ -1,4 +1,6 @@
 from sys import stderr
+import re
+from itertools import accumulate
 from assembler.config import settings
 
 """
@@ -12,6 +14,9 @@ It parses the path field to record nodes and orientations, stored in two numpy a
 For gaf tags see: https://github.com/lh3/gfatools/blob/master/doc/rGFA.md#the-graph-alignment-format-gaf
 For cs tag description see : https://lh3.github.io/minimap2/minimap2.html#10
 """
+
+# Precompiled at import time — reused for every call
+_CS_OPS = re.compile(r'[+\-=][ACGTNacgtn]+|:[0-9]+|\*[ACGTNacgtn]{2}')
 
 
 def processGafLine(gaf_line: str):
@@ -36,6 +41,8 @@ def processGafLine(gaf_line: str):
         nodes_list : list - of node_ids of the nodes walked by the path
         orientation_list : list - of node orientations of the nodes walked by the path
         cs_line : list - succession of tuples describing the cigar
+        cum_path : list - prefix sums of path deltas, length len(cs_line)+1, starting with 0
+        cum_seq : list - prefix sums of seq deltas, length len(cs_line)+1, starting with 0
     """
 
     line_elements = gaf_line.split()
@@ -79,18 +86,12 @@ def processGafLine(gaf_line: str):
         count_positive_orientation_nodes = orientation_list.count(True)
         relative_strand = True if count_positive_orientation_nodes > (len(orientation_list) / 2) else False
 
-        # decompose the cs tag into alignment steps
+        # decompose the cs tag into alignment steps + precomputed cumulative offsets
         if len(line_elements[settings.CS_TAG_ID]) > settings.MIN_CS_LEN:
-            cs_line = [i for i in parse_cs_tag(line_elements[settings.CS_TAG_ID])]
+            cs_line, cum_path, cum_seq = parse_cs_tag(line_elements[settings.CS_TAG_ID])
         else:
             print("ERROR IN CS LINE.",flush=True, file=stderr)
             return None
-        # print(f"{read_name}: {cs_line}!r")
-
-        # # Append in a file
-        # if reads_out_file:
-        #     with open(reads_out_file, "a") as reads_f:
-        #         print(f"{read_name}\t{read_len}\t{relative_strand}\t{mapq}\t{div}\t{path_start}\t{path_end}\t{nodes_list}\t{orientation_list}\t{cs_line}", file=reads_f)
 
         return [
             read_name,
@@ -104,6 +105,8 @@ def processGafLine(gaf_line: str):
             nodes_list,
             orientation_list,
             cs_line,
+            cum_path,   # after handler slice: index 9 = CUM_PATH_POSITION
+            cum_seq,    # after handler slice: index 10 = CUM_SEQ_POSITION
         ]
 
     if settings.DEBUG:
@@ -113,24 +116,31 @@ def processGafLine(gaf_line: str):
 
 def parse_cs_tag(cs_string: str):
     """
-    This generator iterates over the cs tag string and returns a list of 'steps' that spell the alignment
-    between the read and the path.
-    It parses the cs tag to represent it as a list of steps. Each step is a tuple representing the
-    difference operator (+,-,:,=,*) and the length of the operation in basepairs.
+    Parses the cs tag string into a list of alignment steps, plus the cumulative path and
+    sequence offsets after each step. Each step is a tuple of (flag, length) where flag is
+    the operation character and length is the size of the operation in basepairs.
     For cs tag description see : https://lh3.github.io/minimap2/minimap2.html#10
-    I made it as generator at the beginning thinking about walking on the cs on the fly. Probably not useful now.
+
+    cum_path and cum_seq let verify_sequence_agreement binary search directly to the cs
+    step an anchor starts in, instead of walking every step of the cs tag from the
+    beginning for every anchor it checks against this read.
 
     Parameters
     ----------
     cs_string : string
         a string spelling the cs tag in the gaf
 
-    Yields
+    Returns
     -------
-    The tuple associated to the last cs tag operator.
-
+    ops : list of (flag, length) tuples
+        the cs tag operations, in order
+    cum_path : list[int]
+        running path position after each step (prefix sums of path deltas), length
+        len(ops)+1, starting with 0. Only ever increases, so it can be binary searched.
+    cum_seq : list[int]
+        running read-sequence position after each step (prefix sums of seq deltas), same
+        length and starting value as cum_path.
     """
-
     # flag characters used to represent the basepair alignment
     # = : identical sequence, spelled [ACGTN]+
     # + : insertion to the reference, spelled [ACGTN]+
@@ -138,45 +148,25 @@ def parse_cs_tag(cs_string: str):
     # : : identical sequence, length [0-9]+
     # * : substitution (reference to query) [acgtn][acgtn]
 
-    # example: cs:Z::6724+T:581+A:1027+G:2962-A:278
-    # cs:Z::22+T:7+G:21+T:448+T:676-A:666-A:821-A:819-T:455*CA:340+C:192-A:1757+C:947-C:660-C:616+T:315-G:51+T:20*AT:600+T:721+G:82-G:689+T:930-G:88-T:193+GTC:353-G:163-A:297+C:39+C:173-T:368+T:511-T:198-A:615-G:210-C:501-T:648-T:330-C:1211-C:617-GT:9-T:41+T:19-A:244-T:299*GT:5+GCTTT:60+T:172+G:25+A:48+A:22
-
-    flag_chars = ":*+-="
-    # 'i' is defined as 5, as the first part of the field is "cs:Z:"
-    i = settings.MIN_CS_LEN - 1
-    #until 'i' gets to the end of the string
-    while i < len(cs_string):
-        # if one of the flag that is followed by a sequence string
-        if cs_string[i] in "+-=":
-            # the flag is the element pointed by 'i' 
-            flag_c = cs_string[i]
-            count = i
-            i += 1
-            # scan until you find another tag or the end
-            while i < len(cs_string) and cs_string[i] not in flag_chars:
-                i += 1
-            # report the length of the string (and the flag)
-            yield (flag_c, i - count - 1)
-            continue
-        
-        # if it is identical and the next characters define the length of the identity
-        elif cs_string[i] == ":":
-            number = ""
-            i += 1
-            # scan until you find another tag or consume the whole string
-            while i < len(cs_string) and (cs_string[i] not in flag_chars):
-                if i < len(cs_string):
-                    number += cs_string[i]
-                    i += 1
-            # convert to integer the string of the identity length
-            yield (":", int(number))
-            continue
-
-        # if it is a sustitution, it has length 2
-        elif cs_string[i] == "*":
-            i = i + 3
-            yield ("*", 1)
-            continue
-
-        else:
-            i = i + 1
+    # example: cs:Z::6724+T:581+A:1027-G:2962
+    ops = []
+    path_deltas = []
+    seq_deltas = []
+    for match in _CS_OPS.finditer(cs_string):
+        op_str = match.group()
+        flag = op_str[0]
+        if flag == ':':
+            length = int(op_str[1:])
+            ops.append((':', length)); path_deltas.append(length); seq_deltas.append(length)
+        elif flag == '*':
+            ops.append(('*', 1)); path_deltas.append(1); seq_deltas.append(1)
+        elif flag == '+':
+            length = len(op_str) - 1
+            ops.append(('+', length)); path_deltas.append(0); seq_deltas.append(length)
+        elif flag == '-':
+            length = len(op_str) - 1
+            ops.append(('-', length)); path_deltas.append(length); seq_deltas.append(0)
+        else:  # '='
+            length = len(op_str) - 1
+            ops.append(('=', length)); path_deltas.append(length); seq_deltas.append(length)
+    return ops, list(accumulate(path_deltas, initial=0)), list(accumulate(seq_deltas, initial=0))

@@ -360,7 +360,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [(":",6724),("+",1),(":",581),("+",1),(":",1027),("+",1),(":",2962),("-",1),(":",278)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
@@ -369,7 +369,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [(":",22),("+",1),(":",7),("+",1),(":",21),("+",1),(":",448),("+",1),(":",676),("-",1),(":",666),("-",1),(":",821),("-",1),(":",819),("-",1),(":",455),("*",1),(":",340),("+",1),(":",192),("-",1),(":",1757),("+",1),(":",947),("-",1),(":",660),("-",1),(":",616),("+",1),(":",315),("-",1),(":",51),("+",1),(":",20),("*",1),(":",600),("+",1),(":",721),("+",1),(":",82),("-",1),(":",689),("+",1),(":",930),("-",1),(":",88),("-",1),(":",193),("+",3),(":",353),("-",1),(":",163),("-",1),(":",297),("+",1),(":",39),("+",1),(":",173),("-",1),(":",368),("+",1),(":",511),("-",1),(":",198),("-",1),(":",615),("-",1),(":",210),("-",1),(":",501),("-",1),(":",648),("-",1),(":",330),("-",1),(":",1211),("-",1),(":",617),("-",2),(":",9),("-",1),(":",41),("+",1),(":",19),("-",1),(":",244),("-",1),(":",299),("*",1),(":",5),("+",5),(":",60),("+",1),(":",172),("+",1),(":",25),("+",1),(":",48),("+",1),(":",22)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
@@ -378,7 +378,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [("+",4),(":",21),(":",21),("+",3),("-",5),(":",21)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
@@ -387,7 +387,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [("-",4),("=",2),(":",21),("+",3),("-",5),("+",2),(":",21),("-",2)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
@@ -396,7 +396,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [("-",4)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
     
@@ -405,7 +405,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [("+",14)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
@@ -414,7 +414,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [("=",16)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
@@ -423,7 +423,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [("*",1)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
@@ -432,7 +432,7 @@ class TestParseCsTag(unittest.TestCase):
 
         expected_result = [(":",43452)]
 
-        function_result = [i for i in parse_cs_tag(cigar_string)]
+        function_result = parse_cs_tag(cigar_string)[0]
 
         self.assertEqual(function_result,expected_result)
 
