@@ -254,18 +254,23 @@ class AlignAnchor:
         """
         If FASTA file is provided, read it and update the read_id_map dictionary which maps the read_name to a read_id for Shasta process
         """
-        
+
         self.fasta_path = fasta_path
         self.read_sequences = {}
+        lines = []
         with open(fasta_path, "r") as f:
             read_name = None
             for line in f:
                 if line.startswith(">"):
+                    if read_name is not None:
+                        self.read_sequences[read_name] = "".join(lines)
                     read_name = line.strip().split()[0][1:]
-                    self.read_sequences[read_name] = ""
+                    lines = []
                 elif read_name:
-                    self.read_sequences[read_name] += line.strip()
-        
+                    lines.append(line.strip())
+            if read_name is not None:
+                self.read_sequences[read_name] = "".join(lines)
+
         if self.read_id_map:
             self.read_sequences = {self.read_id_map.get(name): seq for name, seq in self.read_sequences.items() if self.read_id_map.get(name) is not None}
 
