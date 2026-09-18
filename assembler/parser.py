@@ -1,5 +1,6 @@
 from sys import stderr
 import re
+from array import array
 from itertools import accumulate
 from assembler.config import settings
 
@@ -134,12 +135,15 @@ def parse_cs_tag(cs_string: str):
     -------
     ops : list of (flag, length) tuples
         the cs tag operations, in order
-    cum_path : list[int]
+    cum_path : array.array('q')
         running path position after each step (prefix sums of path deltas), length
         len(ops)+1, starting with 0. Only ever increases, so it can be binary searched.
-    cum_seq : list[int]
+        array.array instead of list: built once and only ever read afterward (never
+        mutated), every element a plain int, so packed 8-byte C longs cost ~4x less
+        memory than a list of PyLong objects for these hot, per-read structures.
+    cum_seq : array.array('q')
         running read-sequence position after each step (prefix sums of seq deltas), same
-        length and starting value as cum_path.
+        length and starting value as cum_path. Same array.array rationale as cum_path.
     """
     # flag characters used to represent the basepair alignment
     # = : identical sequence, spelled [ACGTN]+
@@ -169,4 +173,4 @@ def parse_cs_tag(cs_string: str):
         else:  # '='
             length = len(op_str) - 1
             ops.append(('=', length)); path_deltas.append(length); seq_deltas.append(length)
-    return ops, list(accumulate(path_deltas, initial=0)), list(accumulate(seq_deltas, initial=0))
+    return ops, array('q', accumulate(path_deltas, initial=0)), array('q', accumulate(seq_deltas, initial=0))
